@@ -31,10 +31,10 @@ describe("Cloudflare-compatible browser auth surfaces", () => {
     expect(activity).toContain("headers,");
   });
 
-  it("uses the same fallback for auth gates and account setup", () => {
+  it("uses the same fallback for authenticated workspaces while account links remain public", () => {
     expect(read("app/workspace/page.tsx")).toContain("browserAuthHeaders(db)");
     expect(read("app/monitor/page.tsx")).toContain("browserAuthHeaders(db)");
-    expect(read("app/account/page.tsx")).toContain("browserAuthHeaders(db)");
+    expect(read("app/account/page.tsx")).toContain('redirect("/workspace")');
     expect(read("app/HeaderAccount.tsx")).toContain("/api/auth/session");
   });
 
