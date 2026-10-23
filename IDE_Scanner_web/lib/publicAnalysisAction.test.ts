@@ -9,18 +9,26 @@ describe("public analysis action", () => {
     scanned: true,
   };
 
-  it("takes a signed-in user directly to the full report", () => {
-    expect(publicAnalysisAction({ ...input, signedIn: true })).toEqual({
+  it("opens the full report publicly for a completed scan", () => {
+    expect(publicAnalysisAction(input)).toEqual({
       href: input.fullAnalysisHref,
       label: "Open Full Analysis",
       requiresSignIn: false,
     });
   });
 
-  it("preserves the sign-in handoff for a signed-out user", () => {
-    expect(publicAnalysisAction({ ...input, signedIn: false })).toEqual({
-      href: "/account?next=%2Fextensions%2Fmhutchie.git-graph%2Fversions%2F1.30.0%2Fscans%2Fscan-1",
-      label: "Sign in for Full Analysis",
+  it("keeps a public summary available if a completed scan has no report link", () => {
+    expect(publicAnalysisAction({ ...input, fullAnalysisHref: undefined })).toEqual({
+      href: "/extensions/mhutchie.git-graph/versions/1.30.0",
+      label: "View Analysis Summary",
+      requiresSignIn: false,
+    });
+  });
+
+  it("still sends new scan requests through sign-in", () => {
+    expect(publicAnalysisAction({ ...input, scanned: false })).toEqual({
+      href: "/account?next=%2Fextensions%2Fmhutchie.git-graph%2Fversions%2F1.30.0",
+      label: "Sign in to request a Deep Scan",
       requiresSignIn: true,
     });
   });

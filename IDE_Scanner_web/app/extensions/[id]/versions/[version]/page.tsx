@@ -23,8 +23,6 @@ export default async function VersionPage({ params }: { params: Promise<{ id: st
       ? { ...item, latest_scan_id: scan.id, scan_state: scan.analysis_status, decision: scan.decision, coverage_percent: scan.coverage_percent, scanned_at: scan.scanned_at || scan.created_at }
       : item)
     : extensionProduct.versions;
-  // Authentication is intentionally resolved by the full-analysis route. A
-  // public summary must remain cacheable and must not vary its HTML by a
-  // session cookie.
-  return <PublicSecuritySummary extension={extensionProduct.extension} version={version} versions={versions} scan={scan || null} fullAnalysisHref={fullAnalysisHref} signedIn={false}/>;
+  // Public report links stay cacheable and never depend on a visitor's session.
+  return <PublicSecuritySummary extension={extensionProduct.extension} version={version} versions={versions} scan={scan || null} fullAnalysisHref={fullAnalysisHref}/>;
 }

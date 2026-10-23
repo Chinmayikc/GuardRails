@@ -7,7 +7,9 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
     await page.setViewportSize(viewport);
     await page.goto(report);
     await expect(page.getByText("Review needed", { exact: true }).first()).toBeVisible();
-    await expect(page.getByRole("link", { name: /Sign in for Full Analysis/i })).toBeVisible();
+    const reportLink = page.getByRole("link", { name: /Open Full Analysis/i });
+    await expect(reportLink).toBeVisible();
+    await expect(reportLink).toHaveAttribute("href", /\/extensions\/GitHub\.copilot\/versions\/1\.388\.0\/scans\//);
     await expect(page.getByRole("link", { name: /Read README and releases/i })).toHaveAttribute("href", "/extensions/GitHub.copilot");
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(viewport.width);
   });

@@ -54,13 +54,14 @@ test("extension profile and report use one current outcome", async ({ page }) =>
   await expect(page.getByText("Operational action", { exact: true })).toHaveCount(0);
 });
 
-test("public security summary stays concise and full analysis requires sign-in", async ({ page }) => {
+test("public security summary opens full analysis without sign-in", async ({ page }) => {
   await page.goto("/extensions/GitHub.copilot/versions/1.388.0");
   await expect(page.getByText("Extension Security Summary", { exact: true })).toBeVisible();
   await expect(page.getByText("Raw evidence", { exact: true })).toHaveCount(0);
-  await expect(page.getByRole("link", { name: /Sign in for Full Analysis/i })).toBeVisible();
+  await expect(page.getByRole("link", { name: /Open Full Analysis/i })).toBeVisible();
   await page.goto("/extensions/GitHub.copilot/versions/1.388.0/scans/0975989d-c11f-4830-9bfb-082e732fad1a");
-  await expect(page).toHaveURL(/\/account\?next=/);
+  await expect(page).toHaveURL(/\/extensions\/GitHub\.copilot\/versions\/1\.388\.0\/scans\/0975989d-c11f-4830-9bfb-082e732fad1a/);
+  await expect(page.getByText("Immutable Deep Scan report", { exact: true })).toBeVisible();
 });
 
 test("Registry cards lead to the public extension profile", async ({ page }) => {

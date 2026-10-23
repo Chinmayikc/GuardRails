@@ -14,7 +14,6 @@ type Props = {
   versions: Array<Record<string, unknown>>;
   scan: Record<string, unknown> | null;
   fullAnalysisHref?: string;
-  signedIn: boolean;
 };
 
 export default function PublicSecuritySummary({
@@ -23,7 +22,6 @@ export default function PublicSecuritySummary({
   versions,
   scan,
   fullAnalysisHref,
-  signedIn,
 }: Props) {
   const decision = scanDecision(scan?.decision);
   const scanned = Boolean(scan?.id) && decision !== "not-scanned";
@@ -79,7 +77,6 @@ export default function PublicSecuritySummary({
         version={version}
         scanned={scanned}
         fullAnalysisHref={fullAnalysisHref}
-        initialSignedIn={signedIn}
         scanSupported={extension.scan_supported}
         scanSupportReason={extension.scan_support_reason}
       />
