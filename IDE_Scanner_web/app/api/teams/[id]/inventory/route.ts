@@ -1,0 +1,122 @@
+import { NextResponse } from "next/server";
+import { authenticated } from "@/lib/auth";
+import { serviceDb } from "@/lib/supabase";
+import { teamApiError } from "@/lib/teamApiError";
+import { requireTeamRole } from "@/lib/teams";
+import { InventoryValidationError, parseTeamInventoryImport } from "@/lib/teamInventory";
+import { getWorkspaceState, saveState } from "@/lib/cloudflareWorkspace";
+import { getCloudflareRegistryProduct } from "@/lib/cloudflareRegistry";
+
+type Context = { params: Promise<{ id: string }> };
+type Installation = { device_id: string; extension_id: string; version: string; registry: string; artifact_sha256?: string | null; reported_at: string };
+type Scan = { id: string; extension_id: string; version: string; decision: string; severity: string; scanned_at: string };
+
+export async function GET(request: Request, context: Context) {
+  try {
+    const { user, provider } = await authenticated(request);
+    const { id } = await context.params;
+    await requireTeamRole(id, user.id, ["owner", "admin", "analyst", "viewer"]);
+    if (provider === "cloudflare") {
+      const state = await getWorkspaceState(id);
+      const reportRows = await Promise.all(state.inventory.installations.map(async (installation) => {
+        const extensionId = String(installation.extension_id || "");
+        const version = String(installation.version || "");
+        const report = await getCloudflareRegistryProduct<{ extension?: Record<string, unknown>; versions?: Array<Record<string, unknown>> }>(extensionId);
+        const latest = report?.versions?.find((candidate) => String(candidate.version) === version);
+        const watched = state.watchlist.some((item) => String(item.extension_id).toLowerCase() === extensionId.toLowerCase());
+        return { device_id: String(installation.device_id || ""), extension_id: extensionId, version, registry: String(installation.registry || "unknown"), reported_at: String(installation.reported_at || ""), display_name: String(report?.extension?.display_name || extensionId), status: latest?.latest_scan_id ? "scanned" : "unscanned", monitored: watched, decision: null, severity: null };
+      }));
+      return NextResponse.json({ devices: state.inventory.devices, items: reportRows, summary: { devices: state.inventory.devices.length, installations: reportRows.length, unique_extensions: new Set(reportRows.map((item) => String(item.extension_id).toLowerCase())).size, scanned: reportRows.filter((item) => item.status === "scanned").length, review_required: 0, unscanned: reportRows.filter((item) => item.status === "unscanned").length, unknown: 0, monitored: reportRows.filter((item) => item.monitored).length }, last_import_at: state.inventory.last_import_at });
+    }
+    const db = serviceDb();
+    const [installationResult, deviceResult, watchResult, importResult] = await Promise.all([
+      db.from("team_inventory_installations").select("device_id,extension_id,version,registry,artifact_sha256,reported_at").eq("team_id", id).order("extension_id"),
+      db.from("team_inventory_devices").select("id,external_id,display_name,platform,source,last_seen_at").eq("team_id", id).order("last_seen_at", { ascending: false }),
+      db.from("team_watchlist_items").select("extension_id,monitoring_state,baseline_version").eq("team_id", id),
+      db.from("team_inventory_imports").select("created_at").eq("team_id", id).order("created_at", { ascending: false }).limit(1).maybeSingle(),
+    ]);
+    const firstError = [installationResult.error, deviceResult.error, watchResult.error, importResult.error].find(Boolean);
+    if (firstError) throw firstError;
+    const installations = (installationResult.data || []) as Installation[];
+    const extensionIds = [...new Set(installations.map((item) => item.extension_id))];
+    const versions = [...new Set(installations.map((item) => item.version))];
+    const [extensionResult, scanResult] = extensionIds.length
+      ? await Promise.all([
+          db.from("extensions").select("id,display_name,icon_url").in("id", extensionIds),
+          db.from("scans").select("id,extension_id,version,decision,severity,scanned_at").in("extension_id", extensionIds).in("version", versions).eq("analysis_status", "complete").order("scanned_at", { ascending: false }),
+        ])
+      : [{ data: [], error: null }, { data: [], error: null }];
+    if (extensionResult.error) throw extensionResult.error;
+    if (scanResult.error) throw scanResult.error;
+
+    const extensions = new Map((extensionResult.data || []).map((item) => [String(item.id).toLowerCase(), item]));
+    const watches = new Map((watchResult.data || []).map((item) => [String(item.extension_id).toLowerCase(), item]));
+    const scans = new Map<string, Scan>();
+    for (const scan of (scanResult.data || []) as Scan[]) {
+      const key = `${scan.extension_id.toLowerCase()}@${scan.version}`;
+      if (!scans.has(key)) scans.set(key, scan);
+    }
+    const items = installations.map((item) => {
+      const extension = extensions.get(item.extension_id.toLowerCase());
+      const watch = watches.get(item.extension_id.toLowerCase());
+      const scan = scans.get(`${item.extension_id.toLowerCase()}@${item.version}`);
+      const status = !extension ? "unknown" : !scan ? "unscanned" : ["review", "block"].includes(scan.decision) ? "review_required" : "scanned";
+      return { ...item, display_name: extension?.display_name || item.extension_id, icon_url: extension?.icon_url || null, status, monitored: Boolean(watch), monitoring_state: watch?.monitoring_state || null, scan_id: scan?.id || null, decision: scan?.decision || null, severity: scan?.severity || null };
+    });
+    return NextResponse.json({
+      devices: deviceResult.data || [],
+      items,
+      summary: {
+        devices: (deviceResult.data || []).length,
+        installations: items.length,
+        unique_extensions: new Set(items.map((item) => item.extension_id.toLowerCase())).size,
+        scanned: items.filter((item) => item.status === "scanned").length,
+        review_required: items.filter((item) => item.status === "review_required").length,
+        unscanned: items.filter((item) => item.status === "unscanned").length,
+        unknown: items.filter((item) => item.status === "unknown").length,
+        monitored: items.filter((item) => item.monitored).length,
+      },
+      last_import_at: importResult.data?.created_at || null,
+    });
+  } catch (error) {
+    const failure = teamApiError(error, "Team inventory is temporarily unavailable. Please try again.");
+    return NextResponse.json({ error: failure.error }, { status: failure.status });
+  }
+}
+
+export async function POST(request: Request, context: Context) {
+  try {
+    const { user, provider } = await authenticated(request);
+    const { id } = await context.params;
+    await requireTeamRole(id, user.id, ["owner", "admin", "analyst"]);
+    const input = parseTeamInventoryImport(await request.json().catch(() => null));
+    if (provider === "cloudflare") {
+      const state = await getWorkspaceState(id);
+      const observedAt = input.reported_at;
+      const device = { id: input.device.id, external_id: input.device.id, display_name: input.device.name, platform: input.device.platform, source: input.source, last_seen_at: observedAt };
+      state.inventory.devices = [device, ...state.inventory.devices.filter((item) => String(item.id) !== input.device.id)];
+      state.inventory.installations = [...state.inventory.installations.filter((item) => String(item.device_id) !== input.device.id), ...input.extensions.map((extension) => ({ device_id: input.device.id, extension_id: extension.extension_id, version: extension.version, registry: extension.registry, artifact_sha256: extension.artifact_sha256, reported_at: observedAt }))];
+      state.inventory.last_import_at = observedAt;
+      await saveState(id, state);
+      return NextResponse.json({ import: { device_id: input.device.id, extension_count: input.extensions.length, reported_at: observedAt } }, { status: 201 });
+    }
+    const { data, error } = await serviceDb().rpc("replace_team_inventory_snapshot", {
+      target_team: id,
+      actor: user.id,
+      device_external_id: input.device.id,
+      device_display_name: input.device.name,
+      device_platform: input.device.platform,
+      import_source: input.source,
+      observed_at: input.reported_at,
+      extensions: input.extensions,
+    });
+    if (error) throw error;
+    return NextResponse.json({ import: data }, { status: 201 });
+  } catch (error) {
+    if (error instanceof InventoryValidationError) {
+      return NextResponse.json({ error: error.message }, { status: 400 });
+    }
+    const failure = teamApiError(error, "The inventory could not be imported. Please try again.");
+    return NextResponse.json({ error: failure.error }, { status: failure.status });
+  }
+}

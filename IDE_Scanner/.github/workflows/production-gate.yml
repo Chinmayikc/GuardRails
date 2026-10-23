@@ -1,0 +1,424 @@
+name: Scanner production gate
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  deterministic-corpus:
+    runs-on: ubuntu-latest
+    # The gate runs the complete scanner suite plus exact real-artifact
+    # calibration scans. Keep the job bounded, but above the observed local
+    # suite duration so a healthy release is not rejected as an operational
+    # timeout before the accuracy checks run.
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install -e . pytest
+      - name: Acquire exact real-artifact calibration input
+        run: |
+          mkdir -p benchmarks/external/artifacts/bcai-rosetta-4.0.37
+          python - <<'PY'
+          from pathlib import Path
+          from ide_scanner.artifact_input import acquire_https_archive_member, acquire_https_vsix
+
+          destination = Path("benchmarks/external/artifacts/bcai-rosetta-4.0.37")
+          target = destination / "bcai-rosetta-4.0.37.vsix"
+          expected = "b1b9785cdc7be479061f121f282391fba9be013d896d9a54f395621634709216"
+          if target.exists():
+              import hashlib
+              digest = hashlib.sha256(target.read_bytes()).hexdigest()
+              if digest != expected:
+                  raise SystemExit(f"Existing BCAI calibration artifact has SHA-256 {digest}, expected {expected}")
+          else:
+              temporary = acquire_https_vsix(
+                  "https://openvsx.eclipsecontent.org/bingcha/bcai-tools/4.0.37/bingcha.bcai-tools-4.0.37.vsix",
+                  expected,
+                  destination,
+              )
+              temporary.replace(target)
+          destination = Path("benchmarks/external/artifacts/nx-console-18.95.0")
+          destination.mkdir(parents=True, exist_ok=True)
+          target = destination / "nrwl.angular-console-18.95.0.vsix"
+          expected = "1a4afce34918bdc74ae3f31edaffffaa0ee074d83618f53edfd88137927340b8"
+          if target.exists():
+              import hashlib
+              digest = hashlib.sha256(target.read_bytes()).hexdigest()
+              if digest != expected:
+                  raise SystemExit(f"Existing Nx Console calibration artifact has SHA-256 {digest}, expected {expected}")
+          else:
+              temporary = acquire_https_vsix(
+                  "https://raw.githubusercontent.com/trailofbits/vsix-zoo/refs/heads/main/samples/teampcp/nrwl.angular-console-18.95.0.vsix",
+                  expected,
+                  destination,
+              )
+              temporary.replace(target)
+          destination = Path("benchmarks/external/artifacts/formulahendry-code-runner-0.12.2")
+          destination.mkdir(parents=True, exist_ok=True)
+          target = destination / "code-runner-0.12.2.vsix"
+          expected = "4c8e4aea7dd07c9c20173e71869759fb2ce2f55b9819c4b374172467af03b144"
+          package_sha256 = "395ce4df59cb244028110ec6e5921220c55e161164c37e83271d978cd236cb7b"
+          if target.exists():
+              import hashlib
+              digest = hashlib.sha256(target.read_bytes()).hexdigest()
+              if digest != expected:
+                  raise SystemExit(f"Existing Code Runner calibration artifact has SHA-256 {digest}, expected {expected}")
+          else:
+              temporary = acquire_https_archive_member(
+                  "https://packages.chocolatey.org/vscode-code-runner.0.12.2.nupkg",
+                  package_sha256,
+                  "tools/formulahendry.code-runner-0.12.2.vsix",
+                  expected,
+                  destination,
+              )
+              temporary.replace(target)
+          PY
+      - name: Scan exact Nx Console supply-chain calibration input
+        env:
+          IDE_SCANNER_BUILD_SHA: ${{ github.sha }}
+        run: |
+          python -m ide_scanner scan \
+            --path benchmarks/external/artifacts/nx-console-18.95.0/nrwl.angular-console-18.95.0.vsix \
+            --offline \
+            --skip-posture \
+            --profile standard \
+            --extension-advisories src/ide_scanner/intelligence/extension-advisories.json \
+            --format json \
+            --out nx-console-calibration.json
+          python - <<'PY'
+          import json
+
+          expected_hash = "1a4afce34918bdc74ae3f31edaffffaa0ee074d83618f53edfd88137927340b8"
+          report = json.load(open("nx-console-calibration.json", encoding="utf-8"))
+          extensions = report.get("extensions") or []
+          if len(extensions) != 1:
+              raise SystemExit(f"Expected one Nx Console calibration extension, got {len(extensions)}")
+          extension = extensions[0]
+          if extension.get("artifact_hash") != expected_hash:
+              raise SystemExit(f"Nx Console calibration artifact hash drifted: {extension.get('artifact_hash')}")
+          if extension.get("extension_id") != "nrwl.angular-console" or extension.get("version") != "18.95.0":
+              raise SystemExit("Nx Console calibration extension identity drifted")
+          if extension.get("analysis_status") != "complete":
+              raise SystemExit("Nx Console calibration scan is incomplete")
+          if extension.get("decision") != "block" or extension.get("verdict") != "malicious":
+              raise SystemExit("Exact malicious Nx Console calibration artifact was not blocked")
+          if not any(item.get("rule_id") == "known-malicious-extension" for item in extension.get("findings", [])):
+              raise SystemExit("Exact Nx Console advisory-backed finding is missing")
+          print(json.dumps({"artifact_hash": expected_hash, "decision": extension["decision"], "verdict": extension["verdict"]}))
+          PY
+      - name: Acquire exact safe-control inputs
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import hashlib
+          from ide_scanner.artifact_input import acquire_https_archive_member, acquire_https_vsix
+
+          controls = [
+              ("https://github.com/nrwl/nx-console/releases/download/vscode-v18.94.0/nx-console.vsix", "228a2cf081d4cbea9b91cde14a8f9c4a4d003e7f32431496953fd6bac266f5a3", "benchmarks/external/artifacts/public-holdout-2026-09-18/nrwl-angular-console-18.94.0.vsix"),
+              ("https://github.com/streetsidesoftware/vscode-spell-checker/releases/download/code-spell-checker-v4.5.6/code-spell-checker-4.5.6.vsix", "b271bd7ebc445960ecb3cb730da57f22f55abc7411ac94806ab8fe44df8a5c44", "benchmarks/external/artifacts/code-spell-checker-4.5.6/code-spell-checker-4.5.6.vsix"),
+              ("https://github.com/redhat-developer/vscode-yaml/releases/download/1.24.0/vscode-yaml-1.24.0-298.vsix", "0668758312a7fa6beda259ca5a6849d90c5d519df6415edbe246c135e06d7168", "benchmarks/external/artifacts/vscode-yaml-1.24.0/vscode-yaml-1.24.0-298.vsix"),
+              ("https://github.com/rust-lang/rust-analyzer/releases/download/2026-07-13/rust-analyzer-no-server.vsix", "34ac3f72a70a04d2dea5c900c413a651e58c0e8745851aaf5966a951552e22aa", "benchmarks/external/artifacts/rust-analyzer-no-server-2026-07-13/rust-analyzer-no-server.vsix"),
+          ]
+          for url, expected, raw_target in controls:
+              target = Path(raw_target)
+              target.parent.mkdir(parents=True, exist_ok=True)
+              if target.exists():
+                  digest = hashlib.sha256(target.read_bytes()).hexdigest()
+                  if digest != expected:
+                      raise SystemExit(f"Existing safe-control artifact has SHA-256 {digest}, expected {expected}: {target}")
+                  continue
+              temporary = acquire_https_vsix(url, expected, target.parent)
+              temporary.replace(target)
+          python_target = Path("benchmarks/external/artifacts/public-holdout-2026-09-18/ms-python.python-2026.5.2026070801.vsix")
+          python_expected = "7edf45e8e93fd155373fdf80000c56e75344e519442ba570b453da318abe18b8"
+          if python_target.exists():
+              digest = hashlib.sha256(python_target.read_bytes()).hexdigest()
+              if digest != python_expected:
+                  raise SystemExit(f"Existing Python calibration artifact has SHA-256 {digest}, expected {python_expected}")
+          else:
+              temporary = acquire_https_archive_member(
+                  "https://packages.chocolatey.org/vscode-python.2026.5.2026070801.nupkg",
+                  "9c6d6337b7476c2cb26648203537f66e56db020165f5b8a99899f3d8783ebd91",
+                  "tools/ms-python.python-2026.5.2026070801.vsix",
+                  python_expected,
+                  python_target.parent,
+              )
+              temporary.replace(python_target)
+          PY
+      - name: Measure labelled real-artifact noise
+        env:
+          IDE_SCANNER_BUILD_SHA: ${{ github.sha }}
+        run: |
+          python scripts/build_corpus_manifest.py \
+            --path benchmarks/external/artifacts/bcai-rosetta-4.0.37 \
+            --path benchmarks/external/artifacts/nx-console-18.95.0 \
+            --path benchmarks/external/artifacts/public-holdout-2026-09-18 \
+            --path benchmarks/external/artifacts/code-spell-checker-4.5.6 \
+            --path benchmarks/external/artifacts/vscode-yaml-1.24.0 \
+            --path benchmarks/external/artifacts/rust-analyzer-no-server-2026-07-13 \
+            --out real-artifact-label-manifest.json
+          python scripts/scan_corpus.py \
+            --manifest real-artifact-label-manifest.json \
+            --profile standard \
+            --offline \
+            --jobs 1 \
+            --timeout 180 \
+            --out real-artifact-label-scan.json
+          python scripts/audit_report.py \
+            --report real-artifact-label-scan.json \
+            --labels benchmarks/holdouts/real-evidence-2026-source.json \
+            --out real-artifact-label-audit.json
+          python - <<'PY'
+          import json
+
+          audit = json.load(open("real-artifact-label-audit.json", encoding="utf-8"))
+          metrics = audit.get("label_metrics") or {}
+          expected = {
+              "labeled_extensions": 7,
+              "false_positive_review_count": 0,
+              "false_positive_block_count": 0,
+              "false_negative_malware_count": 0,
+          }
+          for field, value in expected.items():
+              if metrics.get(field) != value:
+                  raise SystemExit(f"labelled real-artifact metric {field} drifted: {metrics.get(field)!r} != {value!r}")
+          noisy_rules = [
+              row for row in audit.get("labelled_rule_observations", [])
+              if row.get("known_safe_actionable_extensions", 0) or row.get("known_safe_block_extensions", 0)
+          ]
+          if noisy_rules:
+              raise SystemExit(f"known-safe real artifacts produced actionable rule noise: {noisy_rules}")
+          print(json.dumps({
+              "labeled_extensions": metrics["labeled_extensions"],
+              "false_positive_review_count": metrics["false_positive_review_count"],
+              "false_positive_block_count": metrics["false_positive_block_count"],
+              "false_negative_malware_count": metrics["false_negative_malware_count"],
+          }, sort_keys=True))
+          PY
+      - name: Unit and integration tests
+        run: python -m pytest -q
+      - name: Scan deterministic production fixtures
+        env:
+          IDE_SCANNER_BUILD_SHA: ${{ github.sha }}
+        run: |
+          python -m ide_scanner scan \
+            --fixtures \
+            --offline \
+            --skip-posture \
+            --threat-feed benchmarks/threat-feed.json \
+            --format json \
+            --out production-fixtures.json
+      - name: Audit rule-level noise and routing
+        run: |
+          python scripts/audit_report.py \
+            --report production-fixtures.json \
+            --out production-rule-audit.json
+      - name: Scan exact real-artifact calibration input
+        env:
+          IDE_SCANNER_BUILD_SHA: ${{ github.sha }}
+        run: |
+          # This is an independently reported, exact-hash artifact. Keep the
+          # result separate from synthetic fixtures so a green fixture gate
+          # cannot hide a regression in real published-package handling.
+          python -m ide_scanner scan \
+            --path benchmarks/external/artifacts/bcai-rosetta-4.0.37/bcai-rosetta-4.0.37.vsix \
+            --offline \
+            --skip-posture \
+            --profile standard \
+            --extension-advisories src/ide_scanner/intelligence/extension-advisories.json \
+            --format json \
+            --out bcai-calibration.json
+          python - <<'PY'
+          import json
+
+          expected_hash = "b1b9785cdc7be479061f121f282391fba9be013d896d9a54f395621634709216"
+          with open("bcai-calibration.json", encoding="utf-8") as handle:
+              report = json.load(handle)
+          extensions = report.get("extensions") or []
+          if len(extensions) != 1:
+              raise SystemExit(f"Expected one exact calibration extension, got {len(extensions)}")
+          extension = extensions[0]
+          if extension.get("artifact_hash") != expected_hash:
+              raise SystemExit(f"Calibration artifact hash drifted: {extension.get('artifact_hash')}")
+          if extension.get("extension_id") != "bingcha.bcai-tools" or extension.get("version") != "4.0.37":
+              raise SystemExit("Calibration extension identity drifted")
+          if extension.get("analysis_status") != "complete":
+              raise SystemExit("Calibration scan is incomplete")
+          if extension.get("decision") != "block" or extension.get("verdict") != "malicious":
+              raise SystemExit("Exact malicious calibration artifact was not blocked")
+          if not any(item.get("rule_id") == "known-malicious-extension" for item in extension.get("findings", [])):
+              raise SystemExit("Exact advisory-backed calibration finding is missing")
+          print(json.dumps({"artifact_hash": expected_hash, "decision": extension["decision"], "verdict": extension["verdict"]}))
+          PY
+      - name: Enforce production corpus invariants
+        env:
+          IDE_SCANNER_BUILD_SHA: ${{ github.sha }}
+        run: |
+          python -m ide_scanner benchmark production \
+            --corpus benchmarks/production-corpus.json \
+            --report production-fixtures.json \
+            --fail-on-regression \
+            --require-identity \
+            --expected-scanner-build "$IDE_SCANNER_BUILD_SHA" \
+            --out production-gate.json
+      - name: Scan exact vulnerability calibration input
+        env:
+          IDE_SCANNER_BUILD_SHA: ${{ github.sha }}
+        run: |
+          python -m ide_scanner scan \
+            --path benchmarks/external/artifacts/formulahendry-code-runner-0.12.2/code-runner-0.12.2.vsix \
+            --offline \
+            --skip-posture \
+            --profile standard \
+            --extension-advisories src/ide_scanner/intelligence/extension-advisories.json \
+            --format json \
+            --out code-runner-cve-calibration.json
+          python - <<'PY'
+          import json
+
+          expected_hash = "4c8e4aea7dd07c9c20173e71869759fb2ce2f55b9819c4b374172467af03b144"
+          report = json.load(open("code-runner-cve-calibration.json", encoding="utf-8"))
+          extensions = report.get("extensions") or []
+          if len(extensions) != 1:
+              raise SystemExit(f"Expected one Code Runner calibration extension, got {len(extensions)}")
+          extension = extensions[0]
+          if extension.get("artifact_hash") != expected_hash:
+              raise SystemExit(f"Code Runner calibration artifact hash drifted: {extension.get('artifact_hash')}")
+          if extension.get("extension_id") != "formulahendry.code-runner" or extension.get("version") != "0.12.2":
+              raise SystemExit("Code Runner calibration extension identity drifted")
+          if extension.get("analysis_status") != "complete":
+              raise SystemExit("Code Runner calibration scan is incomplete")
+          if extension.get("decision") != "block" or extension.get("verdict") != "review":
+              raise SystemExit("CVE-backed Code Runner release was not blocked as reviewable vulnerability")
+          if extension.get("malware_score") != 0:
+              raise SystemExit("CVE-backed vulnerability was incorrectly labelled malware")
+          finding = next((item for item in extension.get("findings", []) if item.get("rule_id") == "known-vulnerable-extension"), None)
+          if not finding or finding.get("evidence", {}).get("advisory_id") != "CVE-2025-65715":
+              raise SystemExit("Exact CVE-backed calibration finding is missing")
+          print(json.dumps({"artifact_hash": expected_hash, "decision": extension["decision"], "verdict": extension["verdict"], "advisory": "CVE-2025-65715"}))
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: scanner-production-gate
+          path: |
+            production-fixtures.json
+            production-rule-audit.json
+            real-artifact-label-manifest.json
+            real-artifact-label-scan.json
+            real-artifact-label-audit.json
+            production-gate.json
+            bcai-calibration.json
+            nx-console-calibration.json
+            code-runner-cve-calibration.json
+            benchmarks/external/artifacts/formulahendry-code-runner-0.12.2/*.vsix
+            benchmarks/external/artifacts/nx-console-18.95.0/*.vsix
+            benchmarks/external/artifacts/public-holdout-2026-09-18/*.vsix
+            benchmarks/external/artifacts/code-spell-checker-4.5.6/*.vsix
+            benchmarks/external/artifacts/vscode-yaml-1.24.0/*.vsix
+            benchmarks/external/artifacts/rust-analyzer-no-server-2026-07-13/*.vsix
+          retention-days: 30
+          if-no-files-found: warn
+
+  runtime-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      GUARDRAILS_RUNTIME_EXTERNAL_TRACE: "1"
+      GUARDRAILS_RUNTIME_BWRAP_SUDO: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install runtime isolation backend
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y bubblewrap strace
+          bwrap --version
+          strace --version
+          sudo -n bwrap \
+            --die-with-parent \
+            --new-session \
+            --unshare-net \
+            --unshare-pid \
+            --unshare-uts \
+            --unshare-ipc \
+            --unshare-user \
+            --uid 65534 \
+            --gid 65534 \
+            --cap-drop ALL \
+            --ro-bind /usr /usr \
+            --ro-bind /bin /bin \
+            --ro-bind /sbin /sbin \
+            --ro-bind /lib /lib \
+            --ro-bind /lib64 /lib64 \
+            --ro-bind /etc /etc \
+            --proc /proc \
+            --dev /dev \
+            --tmpfs /tmp \
+            --clearenv \
+            --setenv PATH /usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
+            --chdir / \
+            -- /usr/bin/true
+      - name: Install scanner and analyzers
+        run: python -m pip install -e '.[analysis]'
+      - name: Provision verified runtime sidecars
+        run: python scripts/provision_runtime_dependencies.py --cache "$RUNNER_TEMP/guardrails-runtime-cache"
+      - name: Verify scanner runtime preflight
+        run: python -m ide_scanner.cli sandbox-preflight --out runtime-preflight.json
+      - name: Execute deep runtime smoke corpus
+        env:
+          IDE_SCANNER_BUILD_SHA: ${{ github.sha }}
+          GUARDRAILS_RUNTIME_CACHE: ${{ runner.temp }}/guardrails-runtime-cache
+        run: |
+          python scripts/scan_corpus.py \
+            --path fixtures/agent-tool \
+            --path fixtures/credential-exfil \
+            --profile deep \
+            --runtime \
+            --runtime-timeout 20 \
+            --jobs 1 \
+            --timeout 90 \
+            --out runtime-smoke.json
+          python - <<'PY'
+          import json
+
+          report = json.load(open("runtime-smoke.json", encoding="utf-8"))
+          execution = report.get("corpus_execution", {})
+          if execution.get("runtime_enabled") is not True or execution.get("profile") != "deep":
+              raise SystemExit("runtime smoke report did not prove deep runtime execution")
+          if execution.get("external_syscall_trace") is not True:
+              raise SystemExit("runtime smoke report did not prove external syscall tracing")
+          if execution.get("incomplete_count") != 0:
+              raise SystemExit("runtime smoke corpus is incomplete")
+          extensions = report.get("extensions") or []
+          if len(extensions) != 2:
+              raise SystemExit("runtime smoke corpus did not return exactly two extensions")
+          for extension in extensions:
+              provider = ((extension.get("analysis_coverage") or {}).get("providers") or {}).get("dynamic_sandbox") or {}
+              if provider.get("status") != "completed" or provider.get("executed") is not True:
+                  raise SystemExit(f"dynamic runtime provider was not completed: {provider}")
+          credential = next((item for item in extensions if item.get("extension_id") == "unknown.shadow-helper"), None)
+          if credential is None:
+              raise SystemExit("runtime smoke corpus did not include the credential-exfiltration control")
+          observed_kinds = ((report.get("intelligence") or {}).get("dynamic_sandbox") or {}).get("observed_kinds") or {}
+          if "secret_exfil" not in observed_kinds.get("unknown.shadow-helper", []):
+              raise SystemExit("runtime smoke did not observe the credential canary reaching a network body")
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: scanner-runtime-smoke
+          path: |
+            runtime-preflight.json
+            runtime-smoke.json
+          retention-days: 30
+          if-no-files-found: warn

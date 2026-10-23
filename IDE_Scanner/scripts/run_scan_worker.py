@@ -1,0 +1,478 @@
+from __future__ import annotations
+
+import json
+import os
+import re
+import signal
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+try:
+    from scripts import callback_scan, claim_scan
+except ModuleNotFoundError:  # Direct `python scripts/run_scan_worker.py` execution.
+    import callback_scan  # type: ignore[no-redef]
+    import claim_scan  # type: ignore[no-redef]
+
+from ide_scanner.sandbox_runner import sandbox_preflight
+
+
+TARGET_PLATFORM_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,31}$")
+SHA256_RE = re.compile(r"^[0-9a-f]{64}$", re.IGNORECASE)
+
+
+def main() -> int:
+    try:
+        require_runtime_preflight()
+    except RuntimeError as error:
+        print(f"Deep Scan worker not started: {error}", file=sys.stderr)
+        return 2
+    max_jobs = bounded_jobs(os.environ.get("SCAN_JOBS_PER_WORKER", "1"))
+    empty_claim_retries = bounded_retries(os.environ.get("SCAN_EMPTY_CLAIM_RETRIES", "5"))
+    claim_error_retries = bounded_retries(os.environ.get("SCAN_CLAIM_ERROR_RETRIES", "8"))
+    artifact_root = Path(
+        os.environ.get(
+            "IDE_SCANNER_WORKER_ARTIFACTS",
+            os.path.join(os.environ.get("RUNNER_TEMP", "/tmp"), "ide-scanner-worker-artifacts"),
+        )
+    )
+    artifact_root.mkdir(parents=True, exist_ok=True)
+    claim_scan.urllib.request.install_opener(
+        claim_scan.urllib.request.build_opener(urllib_redirect_handler())
+    )
+
+    exact_job_id = os.environ.get("SCAN_JOB_ID", "").strip() or None
+    enqueued_job_id = os.environ.get("SCAN_ENQUEUED_JOB_ID", "").strip() or None
+    job_timeout = bounded_job_timeout(os.environ.get("SCAN_JOB_TIMEOUT_SECONDS", "300"))
+    failures = 0
+    callback_failures = 0
+    completed = 0
+
+    for index in range(max_jobs):
+        job_id = exact_job_id if index == 0 and exact_job_id else None
+        if index == 0 and not job_id and enqueued_job_id:
+            job_id = enqueued_job_id
+        job = claim_with_retries(
+            claim_url(),
+            job_id=job_id,
+            runner_suffix=str(index),
+            retries=0 if job_id else empty_claim_retries,
+            error_retries=claim_error_retries,
+        )
+        if job is None:
+            break
+
+        try:
+            bundle_path = artifact_root / f"{safe_name(str(job['id']))}.json"
+            scan_result = run_scan(job, bundle_path, timeout_seconds=job_timeout)
+            failure_reason = scan_failure_reason(bundle_path, job) if not scan_result else None
+            callback_result = submit_result(
+                job,
+                bundle_path if scan_result else None,
+                error_message=failure_reason,
+            )
+            if not scan_result or not callback_result:
+                failures += 1
+                if not callback_result:
+                    callback_failures += 1
+            else:
+                completed += 1
+        except Exception as error:  # noqa: BLE001 - report one bad artifact, then drain the queue.
+            failures += 1
+            if not report_failure(job, f"Deep Scan worker failed: {type(error).__name__}: {error}"):
+                callback_failures += 1
+        if exact_job_id:
+            break
+
+    print(json.dumps({"completed": completed, "failures": failures, "max_jobs": max_jobs}, sort_keys=True))
+    if failures and not callback_failures:
+        print(
+            "Deep Scan job failures were recorded in the control plane; "
+            "the worker run itself completed.",
+            file=sys.stderr,
+        )
+    return 1 if callback_failures else 0
+
+
+def require_runtime_preflight() -> None:
+    """Refuse to claim production jobs unless runtime isolation is ready."""
+    result = sandbox_preflight()
+    if result.get("status") != "ready":
+        detail = str(result.get("error") or "runtime isolation preflight did not complete")
+        raise RuntimeError(f"Production scan worker requires a ready runtime sandbox: {detail}")
+
+
+def run_scan(job: dict[str, object], bundle_path: Path, *, timeout_seconds: int = 300) -> bool:
+    extension_id = str(job["extension_id"])
+    version = str(job["version"])
+    target_platform = str(job.get("target_platform") or "").strip().lower()
+    if target_platform and not TARGET_PLATFORM_RE.fullmatch(target_platform):
+        raise RuntimeError("Scan claim target platform is invalid")
+
+    command = [
+        sys.executable,
+        "-m",
+        "ide_scanner",
+        "scan",
+        "--extension-id",
+        extension_id,
+        "--version",
+        version,
+        "--profile",
+        "deep",
+        "--online",
+        "--runtime",
+        "--runtime-timeout",
+        os.environ.get("IDE_SCANNER_RUNTIME_TIMEOUT", "20"),
+        "--format",
+        "bundle.json",
+        "--artifact-store",
+        os.environ["IDE_SCANNER_ARTIFACT_STORE"],
+        "--output",
+        str(bundle_path),
+    ]
+    # Public publication reports only need the bounded finding graph and
+    # separately stored previews. Raw evidence duplicates source snippets in
+    # every D1 report and can exhaust the scan database without improving the
+    # release contract. Keep raw evidence for interactive/user scans, but do
+    # not persist it for public cohorts or benchmark artifacts.
+    if str(job.get("scan_purpose") or "user_request") not in {"public_intelligence", "benchmark"}:
+        command.append("--include-raw-evidence")
+    if target_platform:
+        command.extend(["--target-platform", target_platform])
+
+    environment = os.environ.copy()
+    environment["IDE_SCANNER_BUILD_SHA"] = os.environ.get("IDE_SCANNER_BUILD_SHA", "")
+    environment["SCAN_TARGET_PLATFORM"] = target_platform
+    process = subprocess.Popen(
+        isolated_worker_command(command),
+        env=environment,
+        start_new_session=False,
+    )
+    try:
+        returncode = process.wait(timeout=timeout_seconds)
+    except subprocess.TimeoutExpired:
+        terminate_process_group(process)
+        print(
+            f"Scan job {job.get('id', 'unknown')} exceeded the {timeout_seconds}-second worker timeout.",
+            file=sys.stderr,
+        )
+        return False
+    if returncode != 0 or not bundle_path.exists():
+        return False
+    if not bundle_has_immutable_identity(bundle_path, job):
+        print(
+            f"Scan job {job.get('id', 'unknown')} produced no immutable artifact identity.",
+            file=sys.stderr,
+        )
+        return False
+    print_runtime_coverage_summary(bundle_path, job)
+    return True
+
+
+def bundle_has_immutable_identity(bundle_path: Path, job: dict[str, object]) -> bool:
+    """Validate the minimum identity contract before calling the web boundary.
+
+    The website remains the authoritative canonical validator. This worker
+    check only prevents a stale or regressed scanner binary from turning an
+    acquisition failure into an avoidable callback 422.
+    """
+    try:
+        bundle = json.loads(bundle_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        return False
+    if not isinstance(bundle, dict):
+        return False
+    raw_extensions = bundle.get("extensions")
+    if isinstance(raw_extensions, dict):
+        details = [item for item in raw_extensions.values() if isinstance(item, dict)]
+    elif isinstance(raw_extensions, list):
+        details = [item for item in raw_extensions if isinstance(item, dict)]
+    else:
+        return False
+    if len(details) != 1:
+        return False
+    detail = details[0]
+    identity = detail.get("artifact_identity")
+    identity = identity if isinstance(identity, dict) else {}
+    artifact_sha256 = str(identity.get("sha256") or detail.get("artifact_sha256") or "").strip()
+    extension_id = str(detail.get("extension_id") or identity.get("extension_id") or "").strip()
+    version = str(detail.get("version") or identity.get("version") or "").strip()
+    expected_extension_id = str(job.get("extension_id") or "").strip()
+    expected_version = str(job.get("version") or "").strip()
+    return (
+        bool(SHA256_RE.fullmatch(artifact_sha256))
+        and bool(extension_id)
+        and extension_id.lower() == expected_extension_id.lower()
+        and version == expected_version
+    )
+
+
+def scan_failure_reason(bundle_path: Path, job: dict[str, object]) -> str:
+    """Return a bounded, actionable reason for a non-publication-ready scan.
+
+    Deep scans intentionally fail closed, but the old callback discarded the
+    scanner's structured acquisition/manifest reason and left the UI with a
+    generic message. Keep this diagnostic limited to the report contract: no
+    source code, command lines, or runtime values are included.
+    """
+    fallback = "Deep Scan failed before a canonical report was produced."
+    try:
+        bundle = json.loads(bundle_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        return fallback
+    if not isinstance(bundle, dict):
+        return fallback
+    raw_extensions = bundle.get("extensions")
+    if isinstance(raw_extensions, dict):
+        details = [item for item in raw_extensions.values() if isinstance(item, dict)]
+    elif isinstance(raw_extensions, list):
+        details = [item for item in raw_extensions if isinstance(item, dict)]
+    else:
+        return fallback
+    for detail in details:
+        inventory = detail.get("artifact_inventory")
+        inventory = inventory if isinstance(inventory, dict) else {}
+        coverage = detail.get("analysis_coverage")
+        coverage = coverage if isinstance(coverage, dict) else {}
+        providers = coverage.get("providers")
+        providers = providers if isinstance(providers, dict) else {}
+        provider_errors = [
+            str(provider.get("error") or "").strip()
+            for provider in providers.values()
+            if isinstance(provider, dict) and provider.get("error")
+        ]
+        reason = str(
+            inventory.get("skipped_reason")
+            or coverage.get("manifest_error")
+            or (provider_errors[0] if provider_errors else "")
+        ).strip()
+        if reason:
+            extension_id = str(detail.get("extension_id") or job.get("extension_id") or "extension").strip()
+            version = str(detail.get("version") or job.get("version") or "").strip()
+            identity = f"{extension_id}@{version}" if version else extension_id
+            return f"Deep Scan failed before a canonical report was produced for {identity}: {reason[:500]}"
+    return fallback
+
+
+def print_runtime_coverage_summary(bundle_path: Path, job: dict[str, object]) -> None:
+    """Log bounded runtime receipt facts for failed public callbacks.
+
+    The callback boundary intentionally returns only a generic coverage error.
+    Keep the worker log useful for diagnosis without printing raw extension
+    source, paths, commands, or runtime values.
+    """
+    try:
+        bundle = json.loads(bundle_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        return
+    if not isinstance(bundle, dict):
+        return
+    extensions = bundle.get("extensions")
+    if isinstance(extensions, dict):
+        details = [item for item in extensions.values() if isinstance(item, dict)]
+    elif isinstance(extensions, list):
+        details = [item for item in extensions if isinstance(item, dict)]
+    else:
+        return
+    if len(details) != 1:
+        return
+    detail = details[0]
+    coverage = detail.get("analysis_coverage")
+    coverage = coverage if isinstance(coverage, dict) else {}
+    providers = coverage.get("providers")
+    providers = providers if isinstance(providers, dict) else {}
+    runtime = providers.get("dynamic_sandbox")
+    runtime = runtime if isinstance(runtime, dict) else {}
+    intelligence = bundle.get("metadata")
+    intelligence = intelligence if isinstance(intelligence, dict) else {}
+    snapshot = intelligence.get("intelligence_snapshot")
+    snapshot = snapshot if isinstance(snapshot, dict) else {}
+    dynamic_snapshot = snapshot.get("dynamic_sandbox")
+    dynamic_snapshot = dynamic_snapshot if isinstance(dynamic_snapshot, dict) else {}
+    observed_kinds = dynamic_snapshot.get("observed_kinds")
+    if isinstance(observed_kinds, dict):
+        kinds = sorted({str(kind) for values in observed_kinds.values() if isinstance(values, list) for kind in values})[:20]
+    else:
+        kinds = []
+    print(json.dumps({
+        "job_id": str(job.get("id") or ""),
+        "extension_id": str(detail.get("extension_id") or job.get("extension_id") or ""),
+        "version": str(detail.get("version") or job.get("version") or ""),
+        "analysis_status": str(detail.get("analysis_status") or ""),
+        "coverage_status": str(coverage.get("status") or ""),
+        "required": runtime.get("required") is True,
+        "provider_status": str(runtime.get("status") or ""),
+        "runtime_run_status": str(runtime.get("runtime_run_status") or ""),
+        "external_syscall_trace": runtime.get("external_syscall_trace") is True,
+        "external_syscall_trace_available": dynamic_snapshot.get("external_syscall_trace_available") is True,
+        "observed_kinds": kinds,
+    }, sort_keys=True))
+
+
+def isolated_worker_command(command: list[str]) -> list[str]:
+    """Launch the scanner through a clean session before importing analyzers."""
+    launcher = Path(__file__).with_name("exec_scan_worker.py")
+    return [sys.executable, str(launcher), "--", *command]
+
+
+def terminate_process_group(process: subprocess.Popen[object]) -> None:
+    """Stop the scanner and any provider children after a job timeout."""
+    if os.name == "posix":
+        try:
+            os.killpg(process.pid, signal.SIGKILL)
+        except (ProcessLookupError, PermissionError):
+            pass
+    else:  # pragma: no cover - production workers are Linux
+        try:
+            process.kill()
+        except ProcessLookupError:
+            pass
+    try:
+        process.wait(timeout=5)
+    except subprocess.TimeoutExpired:
+        pass
+
+
+def submit_result(
+    job: dict[str, object],
+    bundle_path: Path | None,
+    *,
+    error_message: str | None = None,
+) -> bool:
+    with temporary_environment(
+        {
+            "SCAN_JOB_ID": str(job["id"]),
+            "SCAN_CALLBACK_URL": str(job["callback_url"]),
+            "SCAN_TARGET_PLATFORM": str(job.get("target_platform") or ""),
+            "SCAN_ERROR": error_message or "Deep Scan failed before a canonical report was produced.",
+        }
+    ):
+        try:
+            callback_scan.main([str(bundle_path)] if bundle_path else [])
+            return True
+        except Exception as error:  # noqa: BLE001 - callback status is reflected in D1 and the run summary.
+            print(f"Callback failed for {job['id']}: {error}", file=sys.stderr)
+            return False
+
+
+def report_failure(job: dict[str, object], error_message: str) -> bool:
+    with temporary_environment(
+        {
+            "SCAN_JOB_ID": str(job["id"]),
+            "SCAN_CALLBACK_URL": str(job["callback_url"]),
+            "SCAN_TARGET_PLATFORM": str(job.get("target_platform") or ""),
+            "SCAN_ERROR": error_message,
+        }
+    ):
+        try:
+            callback_scan.main([])
+            return True
+        except Exception as error:  # noqa: BLE001 - preserve the original failure and continue draining.
+            print(f"Failure callback failed for {job['id']}: {error}", file=sys.stderr)
+            return False
+
+
+def claim_url() -> str:
+    configured = os.environ.get("SCAN_CLAIM_URLS") or os.environ.get("SCAN_CLAIM_URL", "")
+    urls = [url.strip() for url in configured.split(",") if url.strip()]
+    if not urls:
+        raise RuntimeError("SCAN_CLAIM_URLS or SCAN_CLAIM_URL is required")
+    return urls[0]
+
+
+def safe_name(value: str) -> str:
+    normalized = re.sub(r"[^A-Za-z0-9_.-]", "_", value)
+    return normalized[:180] or "scan"
+
+
+def bounded_jobs(value: str) -> int:
+    try:
+        jobs = int(value)
+    except ValueError as error:
+        raise RuntimeError("SCAN_JOBS_PER_WORKER must be an integer between 1 and 32") from error
+    if not 1 <= jobs <= 32:
+        raise RuntimeError("SCAN_JOBS_PER_WORKER must be an integer between 1 and 32")
+    return jobs
+
+
+def bounded_retries(value: str) -> int:
+    try:
+        retries = int(value)
+    except ValueError as error:
+        raise RuntimeError("SCAN_EMPTY_CLAIM_RETRIES must be an integer between 0 and 16") from error
+    if not 0 <= retries <= 16:
+        raise RuntimeError("SCAN_EMPTY_CLAIM_RETRIES must be an integer between 0 and 16")
+    return retries
+
+
+def bounded_job_timeout(value: str) -> int:
+    try:
+        timeout = int(value)
+    except ValueError as error:
+        raise RuntimeError("SCAN_JOB_TIMEOUT_SECONDS must be an integer between 60 and 1800") from error
+    if not 60 <= timeout <= 1800:
+        raise RuntimeError("SCAN_JOB_TIMEOUT_SECONDS must be an integer between 60 and 1800")
+    return timeout
+
+
+def claim_with_retries(
+    url: str,
+    *,
+    job_id: str | None,
+    runner_suffix: str,
+    retries: int,
+    error_retries: int = 0,
+) -> dict[str, object] | None:
+    """Retry empty claims and transient queue failures without losing work."""
+    empty_attempt = 0
+    error_attempt = 0
+    while True:
+        try:
+            job = claim_scan.claim_job(url, job_id=job_id, runner_suffix=runner_suffix)
+        except RuntimeError as error:
+            if not is_transient_claim_error(error) or error_attempt >= error_retries:
+                raise
+            time.sleep(min(10.0, 0.5 * (2**error_attempt)))
+            error_attempt += 1
+            continue
+        if job is not None:
+            return job
+        if empty_attempt >= retries:
+            return None
+        time.sleep(min(1.0, 0.2 * (2**empty_attempt)))
+        empty_attempt += 1
+
+
+def is_transient_claim_error(error: RuntimeError) -> bool:
+    message = str(error)
+    return any(f"HTTP {status}" in message for status in (500, 502, 503, 504))
+
+
+class temporary_environment:
+    def __init__(self, values: dict[str, str]):
+        self.values = values
+        self.previous: dict[str, str | None] = {}
+
+    def __enter__(self):
+        for key, value in self.values.items():
+            self.previous[key] = os.environ.get(key)
+            os.environ[key] = value
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        for key, previous in self.previous.items():
+            if previous is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = previous
+        return False
+
+
+def urllib_redirect_handler():
+    return claim_scan._PostPreservingRedirect()
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

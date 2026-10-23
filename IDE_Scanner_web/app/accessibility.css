@@ -1,0 +1,26 @@
+.siteFooter .footerCta {
+  color: #182433 !important;
+}
+
+.extensionIcon > .extensionIconFallback {
+  color: #ffffff !important;
+}
+
+.inventoryCard .extensionIcon > .extensionIconFallback {
+  color: #182433 !important;
+}
+
+.studyStamp span,
+.recurringList article > span {
+  color: #6b5a54 !important;
+}
+
+.dossierHead > span,
+.decisionSummary span {
+  color: #6b5a54 !important;
+}
+
+.gauge-band.low { color: #177d69 !important; }
+.gauge-band.mid { color: #6b4b00 !important; }
+.gauge-band.high { color: #8b2b30 !important; }
+.gauge-band.info { color: #24645f !important; }

@@ -1,0 +1,220 @@
+{
+  "schema_version": "guardrails.holdout-source.v1",
+  "corpus_id": "guardrails-real-evidence-2026",
+  "corpus_version": "2026.09.24.5",
+  "holdout": {
+    "status": "fresh-labeled",
+    "label_source": "Independent review and exact hashes for official publisher controls; independent threat reports, maintainer advisories, MalwareBazaar sample records, and exact hashes for known-malicious artifacts. The Trail of Bits VSIX Zoo mirror is used only when its downloaded bytes match the independently reported digest.",
+    "frozen_at": "2026-09-24T18:14:00Z"
+  },
+  "advisory_snapshot": {
+    "path": "../../src/ide_scanner/intelligence/extension-advisories.json",
+    "snapshot_version": "2026-09-22.1",
+    "sha256": "20a71f9538ff1b25cfcda52e30bdf4e4965ef7f314ad605c33434bcddc19b45b"
+  },
+  "artifacts": [
+    {
+      "extension_id": "nrwl.angular-console",
+      "version": "18.94.0",
+      "label": "known_safe",
+      "artifact_url": "https://github.com/nrwl/nx-console/releases/download/vscode-v18.94.0/nx-console.vsix",
+      "local_path": "../external/artifacts/public-holdout-2026-09-18/nrwl-angular-console-18.94.0.vsix",
+      "sha256": "228a2cf081d4cbea9b91cde14a8f9c4a4d003e7f32431496953fd6bac266f5a3",
+      "label_evidence": {
+        "source_type": "independent_hash_report_and_official_release",
+        "source_url": "https://phoenix.security/vs-code-extension-malware-github-breach-teampcp-2026/",
+        "retrieved_at": "2026-09-18T00:00:00Z",
+        "official_release_url": "https://github.com/nrwl/nx-console/releases/tag/vscode-v18.94.0",
+        "evidence_scope": "exact-artifact",
+        "extension_id": "nrwl.angular-console",
+        "version": "18.94.0",
+        "artifact_sha256": "228a2cf081d4cbea9b91cde14a8f9c4a4d003e7f32431496953fd6bac266f5a3"
+      }
+    },
+    {
+      "extension_id": "streetsidesoftware.code-spell-checker",
+      "version": "4.5.6",
+      "label": "known_safe",
+      "artifact_url": "https://github.com/streetsidesoftware/vscode-spell-checker/releases/download/code-spell-checker-v4.5.6/code-spell-checker-4.5.6.vsix",
+      "local_path": "../external/artifacts/code-spell-checker-4.5.6/code-spell-checker-4.5.6.vsix",
+      "sha256": "b271bd7ebc445960ecb3cb730da57f22f55abc7411ac94806ab8fe44df8a5c44",
+      "label_evidence": {
+        "source_type": "independent_review",
+        "source_url": "https://marketplace.visualstudio.com/items?itemName=streetsidesoftware.code-spell-checker",
+        "publisher_source_url": "https://github.com/streetsidesoftware/vscode-spell-checker",
+        "retrieved_at": "2026-09-19T00:00:00Z",
+        "evidence_scope": "exact-artifact",
+        "extension_id": "streetsidesoftware.code-spell-checker",
+        "version": "4.5.6",
+        "artifact_sha256": "b271bd7ebc445960ecb3cb730da57f22f55abc7411ac94806ab8fe44df8a5c44"
+      }
+    },
+    {
+      "extension_id": "redhat.vscode-yaml",
+      "version": "1.24.0",
+      "label": "known_safe",
+      "artifact_url": "https://github.com/redhat-developer/vscode-yaml/releases/download/1.24.0/vscode-yaml-1.24.0-298.vsix",
+      "local_path": "../external/artifacts/vscode-yaml-1.24.0/vscode-yaml-1.24.0-298.vsix",
+      "sha256": "0668758312a7fa6beda259ca5a6849d90c5d519df6415edbe246c135e06d7168",
+      "label_evidence": {
+        "source_type": "independent_review",
+        "source_url": "https://marketplace.visualstudio.com/items?itemName=redhat.vscode-yaml",
+        "publisher_source_url": "https://github.com/redhat-developer/vscode-yaml",
+        "retrieved_at": "2026-09-19T00:00:00Z",
+        "evidence_scope": "exact-artifact",
+        "extension_id": "redhat.vscode-yaml",
+        "version": "1.24.0",
+        "artifact_sha256": "0668758312a7fa6beda259ca5a6849d90c5d519df6415edbe246c135e06d7168"
+      }
+    },
+    {
+      "extension_id": "rust-lang.rust-analyzer",
+      "version": "0.3.2971",
+      "label": "known_safe",
+      "artifact_url": "https://github.com/rust-lang/rust-analyzer/releases/download/2026-07-13/rust-analyzer-no-server.vsix",
+      "local_path": "../external/artifacts/rust-analyzer-no-server-2026-07-13/rust-analyzer-no-server.vsix",
+      "sha256": "34ac3f72a70a04d2dea5c900c413a651e58c0e8745851aaf5966a951552e22aa",
+      "label_evidence": {
+        "source_type": "independent_review",
+        "source_url": "https://marketplace.visualstudio.com/items?itemName=rust-lang.rust-analyzer",
+        "publisher_source_url": "https://github.com/rust-lang/rust-analyzer",
+        "retrieved_at": "2026-09-19T00:00:00Z",
+        "evidence_scope": "exact-artifact",
+        "extension_id": "rust-lang.rust-analyzer",
+        "version": "0.3.2971",
+        "artifact_sha256": "34ac3f72a70a04d2dea5c900c413a651e58c0e8745851aaf5966a951552e22aa"
+      }
+    },
+    {
+      "extension_id": "bingcha.bcai-tools",
+      "version": "4.0.37",
+      "label": "known_malicious",
+      "artifact_url": "https://open-vsx.org/api/bingcha/bcai-tools/4.0.37/file/bingcha.bcai-tools-4.0.37.vsix",
+      "local_path": "../external/artifacts/bcai-rosetta-4.0.37/bcai-rosetta-4.0.37.vsix",
+      "sha256": "b1b9785cdc7be479061f121f282391fba9be013d896d9a54f395621634709216",
+      "label_evidence": {
+        "source_type": "independent_threat_report",
+        "source_url": "https://www.knostic.ai/blog/agentic-threat-intelligence-feed-vs-code-extensions",
+        "retrieved_at": "2026-09-18T00:00:00Z",
+        "evidence_scope": "exact-artifact",
+        "extension_id": "bingcha.bcai-tools",
+        "version": "4.0.37",
+        "artifact_sha256": "b1b9785cdc7be479061f121f282391fba9be013d896d9a54f395621634709216",
+        "advisory_id": "KNOSTIC-BCAI-2026-4.0.37"
+      }
+    },
+    {
+      "extension_id": "nrwl.angular-console",
+      "version": "18.95.0",
+      "label": "known_malicious",
+      "artifact_url": "https://marketplace.visualstudio.com/_apis/public/gallery/publishers/nrwl/vsextensions/angular-console/18.95.0/vspackage",
+      "artifact_mirrors": [
+        "https://raw.githubusercontent.com/trailofbits/vsix-zoo/main/samples/teampcp/nrwl.angular-console-18.95.0.vsix"
+      ],
+      "sha256": "1a4afce34918bdc74ae3f31edaffffaa0ee074d83618f53edfd88137927340b8",
+      "label_evidence": {
+        "source_type": "maintainer_advisory_and_independent_hash_report",
+        "source_url": "https://github.com/nrwl/nx-console/security/advisories/GHSA-c9j4-9m59-847w",
+        "source_secondary_url": "https://phoenix.security/vs-code-extension-malware-github-breach-teampcp-2026/",
+        "retrieved_at": "2026-09-19T00:00:00Z",
+        "evidence_scope": "exact-artifact",
+        "extension_id": "nrwl.angular-console",
+        "version": "18.95.0",
+        "artifact_sha256": "1a4afce34918bdc74ae3f31edaffffaa0ee074d83618f53edfd88137927340b8",
+        "advisory_id": "GHSA-c9j4-9m59-847w"
+      }
+    },
+    {
+      "extension_id": "Iconkieftwo.icon-theme-materiall",
+      "version": "5.29.1",
+      "label": "known_malicious",
+      "artifact_url": "https://raw.githubusercontent.com/trailofbits/vsix-zoo/main/samples/glassworm/icon-theme-materiall.vsix",
+      "sha256": "0878f3c59755ffaf0b639c1b2f6e8fed552724a50eb2878c3ba21cf8eb4e2ab6",
+      "label_evidence": {
+        "source_type": "independent_threat_report",
+        "source_url": "https://www.nextron-systems.com/2025/11/28/malicious-vs-code-extension-impersonating-material-icon-theme-found-in-marketplace/",
+        "source_secondary_url": "https://raw.githubusercontent.com/trailofbits/vsix-zoo/main/manifest.json",
+        "retrieved_at": "2026-09-19T00:00:00Z",
+        "evidence_scope": "exact-artifact",
+        "extension_id": "Iconkieftwo.icon-theme-materiall",
+        "version": "5.29.1",
+        "artifact_sha256": "0878f3c59755ffaf0b639c1b2f6e8fed552724a50eb2878c3ba21cf8eb4e2ab6",
+        "advisory_id": "NEXTRON-MATERIAL-ICON-THEME-2025-5.29.1"
+      }
+    },
+    {
+      "extension_id": "msjsdreact.react-native-vscode",
+      "version": "1.13.1",
+      "label": "known_malicious",
+      "artifact_url": "https://raw.githubusercontent.com/trailofbits/vsix-zoo/main/samples/malwarebazaar/react-native-vscode.1.13.1.vsix",
+      "sha256": "bb68992f6aa2d3f316322e88d9e71491a38e95fd3a27f48084c66b9c210bd17d",
+      "label_evidence": {
+        "source_type": "trusted_threat_feed_and_independent_hash_report",
+        "source_url": "https://bazaar.abuse.ch/sample/bb68992f6aa2d3f316322e88d9e71491a38e95fd3a27f48084c66b9c210bd17d/",
+        "source_secondary_url": "https://raw.githubusercontent.com/trailofbits/vsix-zoo/main/manifest.json",
+        "retrieved_at": "2026-09-19T00:00:00Z",
+        "evidence_scope": "exact-artifact",
+        "extension_id": "msjsdreact.react-native-vscode",
+        "version": "1.13.1",
+        "artifact_sha256": "bb68992f6aa2d3f316322e88d9e71491a38e95fd3a27f48084c66b9c210bd17d",
+        "advisory_id": "MALWAREBAZAAR-GLASSWORM-REACT-NATIVE-2025-1.13.1"
+      }
+    },
+    {
+      "extension_id": "priskinski.Theme-AllHallowsEve-remake",
+      "version": "1.0.0",
+      "label": "known_malicious",
+      "artifact_url": "https://raw.githubusercontent.com/trailofbits/vsix-zoo/main/samples/malwarebazaar/priskinski.theme-allhallowseve-remake-1.0.0.vsix",
+      "sha256": "a9a6a03bd6958710aeacc2a23860a7f7f0d09497fef85fe658ac5406734061f8",
+      "label_evidence": {
+        "source_type": "trusted_threat_feed_and_independent_hash_report",
+        "source_url": "https://bazaar.abuse.ch/sample/a9a6a03bd6958710aeacc2a23860a7f7f0d09497fef85fe658ac5406734061f8/",
+        "source_secondary_url": "https://raw.githubusercontent.com/trailofbits/vsix-zoo/main/manifest.json",
+        "retrieved_at": "2026-09-19T00:00:00Z",
+        "evidence_scope": "exact-artifact",
+        "extension_id": "priskinski.Theme-AllHallowsEve-remake",
+        "version": "1.0.0",
+        "artifact_sha256": "a9a6a03bd6958710aeacc2a23860a7f7f0d09497fef85fe658ac5406734061f8",
+        "advisory_id": "MALWAREBAZAAR-PRISKINSKI-THEME-2025-1.0.0"
+      }
+    },
+    {
+      "extension_id": "ms-python.python",
+      "version": "2026.5.2026070801",
+      "label": "known_safe",
+      "artifact_url": "https://packages.chocolatey.org/vscode-python.2026.5.2026070801.nupkg",
+      "archive_source": {
+        "archive_sha256": "9c6d6337b7476c2cb26648203537f66e56db020165f5b8a99899f3d8783ebd91",
+        "member": "tools/ms-python.python-2026.5.2026070801.vsix"
+      },
+      "sha256": "7edf45e8e93fd155373fdf80000c56e75344e519442ba570b453da318abe18b8",
+      "label_evidence": {
+        "source_type": "independent_review",
+        "source_url": "https://marketplace.visualstudio.com/items?itemName=ms-python.python",
+        "publisher_source_url": "https://github.com/microsoft/vscode-python",
+        "retrieved_at": "2026-09-19T00:00:00Z",
+        "evidence_scope": "exact-artifact",
+        "extension_id": "ms-python.python",
+        "version": "2026.5.2026070801",
+        "artifact_sha256": "7edf45e8e93fd155373fdf80000c56e75344e519442ba570b453da318abe18b8"
+      }
+    },
+    {
+      "extension_id": "dracula-theme.theme-dracula",
+      "version": "2.25.1",
+      "label": "known_safe",
+      "artifact_url": "https://open-vsx.org/api/dracula-theme/theme-dracula/2.25.1/file/dracula-theme.theme-dracula-2.25.1.vsix",
+      "sha256": "f4d8c28fc64874b1b959cc90dbd39c84d5d35c9cf203e32b7a758dc9abf5b1cb",
+      "label_evidence": {
+        "source_type": "independent_review",
+        "source_url": "https://open-vsx.org/extension/dracula-theme/theme-dracula/2.25.1",
+        "publisher_source_url": "https://github.com/dracula/visual-studio-code",
+        "retrieved_at": "2026-09-24T18:13:00Z",
+        "evidence_scope": "exact-artifact",
+        "extension_id": "dracula-theme.theme-dracula",
+        "version": "2.25.1",
+        "artifact_sha256": "f4d8c28fc64874b1b959cc90dbd39c84d5d35c9cf203e32b7a758dc9abf5b1cb"
+      }
+    }
+  ]
+}

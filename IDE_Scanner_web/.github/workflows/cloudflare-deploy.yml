@@ -1,0 +1,118 @@
+name: Deploy web app to Cloudflare
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Deployment applies D1 migrations. Keep it serialized with publication
+# activation and registry imports so schema changes cannot race the pointer
+# flip or chunk verification.
+concurrency:
+  group: guardrails-production-operations
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Require Cloudflare credentials
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          if [ -z "$CLOUDFLARE_API_TOKEN" ]; then
+            echo "CLOUDFLARE_API_TOKEN is required for a production deployment."
+            exit 1
+          fi
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 2
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - name: Sync optional transactional email provider
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: 26e873c5d55e5e386df482c9dbe8bcd7
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+        run: |
+          if [ -n "$RESEND_API_KEY" ]; then
+            printf '%s' "$RESEND_API_KEY" | npx wrangler secret put RESEND_API_KEY --config wrangler.jsonc
+          else
+            echo "RESEND_API_KEY is not configured; retaining the current email fallback."
+          fi
+      - name: Sync optional Google OAuth client secret
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: 26e873c5d55e5e386df482c9dbe8bcd7
+          GOOGLE_OAUTH_CLIENT_SECRET: ${{ secrets.GOOGLE_OAUTH_CLIENT_SECRET }}
+        run: |
+          if [ -n "$GOOGLE_OAUTH_CLIENT_SECRET" ]; then
+            printf '%s' "$GOOGLE_OAUTH_CLIENT_SECRET" | npx wrangler secret put GOOGLE_OAUTH_CLIENT_SECRET --config wrangler.jsonc
+          else
+            echo "::warning::GOOGLE_OAUTH_CLIENT_SECRET is not configured; Google sign-in will remain unavailable."
+          fi
+      - name: Sync optional GitHub OAuth client secret
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: 26e873c5d55e5e386df482c9dbe8bcd7
+          OAUTH_GITHUB_CLIENT_SECRET: ${{ secrets.OAUTH_GITHUB_CLIENT_SECRET }}
+        run: |
+          if [ -n "$OAUTH_GITHUB_CLIENT_SECRET" ]; then
+            printf '%s' "$OAUTH_GITHUB_CLIENT_SECRET" | npx wrangler secret put GITHUB_OAUTH_CLIENT_SECRET --config wrangler.jsonc
+          else
+            echo "::warning::OAUTH_GITHUB_CLIENT_SECRET is not configured; GitHub sign-in will remain unavailable after authorization."
+          fi
+      - name: Detect D1 migration changes
+        id: schema_changes
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "required=true" >> "$GITHUB_OUTPUT"
+          elif git diff --name-only HEAD^ HEAD | grep -Eq '^d1/migrations(-registry)?/'; then
+            echo "required=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "required=false" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Apply Cloudflare D1 migrations
+        if: steps.schema_changes.outputs.required == 'true'
+        run: |
+          # The registry database is at D1's storage ceiling. The pending
+          # claim indexes are an optimization only; a size-limit response
+          # must not prevent the Worker (or its secrets) from deploying.
+          set +e
+          registry_migration_output=$(npx wrangler d1 migrations apply abscissa-registry --remote 2>&1)
+          registry_migration_status=$?
+          printf '%s\n' "$registry_migration_output"
+          if [ "$registry_migration_status" -ne 0 ]; then
+            if printf '%s' "$registry_migration_output" | grep -q "Exceeded maximum DB size"; then
+              echo "::warning::Registry migration deferred because the D1 database is at its maximum size; continuing with the Worker deployment."
+            else
+              exit "$registry_migration_status"
+            fi
+          fi
+          set -e
+          npx wrangler d1 migrations apply abscissa-scan-data --remote
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: 26e873c5d55e5e386df482c9dbe8bcd7
+      - run: npm run cf:build
+      - name: Exclude source-only registry mirror from Workers Assets
+        run: |
+          # The catalog mirror is fetched by the server-side publication
+          # fallback. It is intentionally kept in git for refresh/audit
+          # workflows, but its 30+ MiB payload exceeds the Workers Assets
+          # per-file limit and must not be uploaded as a public static file.
+          printf '%s\n' 'registry-snapshot.json' > .open-next/assets/.assetsignore
+      - name: Deploy production Worker
+        run: npx wrangler deploy --config wrangler.jsonc
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: 26e873c5d55e5e386df482c9dbe8bcd7
+      - name: Verify production routes
+        run: node scripts/verify-production-deployment.mjs

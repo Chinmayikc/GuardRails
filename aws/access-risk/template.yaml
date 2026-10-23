@@ -1,0 +1,108 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: Abscissa Access Risk demo API with encrypted evidence storage and optional Bedrock explanations.
+
+Parameters:
+  ApiSharedSecret:
+    Type: String
+    NoEcho: true
+    MinLength: 32
+    Description: Random server-to-server secret. Set the same value as ACCESS_RISK_AWS_API_KEY in Vercel.
+  BedrockModelId:
+    Type: String
+    Default: amazon.nova-lite-v1:0
+    Description: Bedrock model ID available in the deployment region.
+
+Globals:
+  Function:
+    Runtime: python3.12
+    Timeout: 28
+    MemorySize: 512
+    Architectures: [arm64]
+    Environment:
+      Variables:
+        ACCESS_RISK_BUCKET: !Ref EvidenceBucket
+        ACCESS_RISK_TOPIC: !Ref FindingsTopic
+        ACCESS_RISK_API_KEY: !Ref ApiSharedSecret
+        BEDROCK_MODEL_ID: !Ref BedrockModelId
+
+Resources:
+  AccessRiskApi:
+    Type: AWS::Serverless::Api
+    Properties:
+      StageName: v1
+      EndpointConfiguration: REGIONAL
+      MethodSettings:
+        - ResourcePath: "/*"
+          HttpMethod: "*"
+          ThrottlingRateLimit: 5
+          ThrottlingBurstLimit: 10
+
+  EvidenceBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: aws:kms
+              KMSMasterKeyID: alias/aws/s3
+            BucketKeyEnabled: true
+      LifecycleConfiguration:
+        Rules:
+          - Id: ExpireDemoEvidence
+            Status: Enabled
+            ExpirationInDays: 30
+
+  FindingsTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      DisplayName: Abscissa Access Risk findings
+
+  AccessRiskFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: app.handler
+      CodeUri: src/
+      Policies:
+        - S3WritePolicy:
+            BucketName: !Ref EvidenceBucket
+        - SNSPublishMessagePolicy:
+            TopicName: !GetAtt FindingsTopic.TopicName
+        - Version: "2012-10-17"
+          Statement:
+            - Effect: Allow
+              Action: kms:GenerateDataKey
+              Resource: "*"
+              Condition:
+                StringEquals:
+                  kms:ViaService: !Sub s3.${AWS::Region}.amazonaws.com
+                StringLike:
+                  kms:EncryptionContext:aws:s3:arn:
+                    - !Sub arn:${AWS::Partition}:s3:::${EvidenceBucket}
+                    - !Sub arn:${AWS::Partition}:s3:::${EvidenceBucket}/*
+        - Version: "2012-10-17"
+          Statement:
+            - Effect: Allow
+              Action: bedrock:InvokeModel
+              Resource: !Sub arn:${AWS::Partition}:bedrock:${AWS::Region}::foundation-model/${BedrockModelId}
+      Events:
+        Analyze:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AccessRiskApi
+            Path: /risk/run
+            Method: POST
+
+Outputs:
+  AccessRiskApiUrl:
+    Description: Set this as ACCESS_RISK_AWS_API_URL in Vercel.
+    Value: !Sub https://${AccessRiskApi}.execute-api.${AWS::Region}.${AWS::URLSuffix}/v1/risk/run
+  EvidenceBucketName:
+    Value: !Ref EvidenceBucket
+  FindingsTopicArn:
+    Value: !Ref FindingsTopic

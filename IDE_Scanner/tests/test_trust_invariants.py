@@ -1,0 +1,698 @@
+from __future__ import annotations
+
+import hashlib
+import json
+import subprocess
+import unittest
+import zipfile
+from pathlib import Path
+from tempfile import TemporaryDirectory
+from unittest.mock import patch
+
+from ide_scanner.scanner import (
+    _artifact_inventory,
+    _finalize_analysis_coverage,
+    _javascript_ast_provider_status,
+    _read_manifest_status,
+    _read_text,
+    _safe_extract_vsix,
+    _vsix_signature_status,
+    scan_extension,
+    scan_targets,
+    scan_vsix,
+)
+
+
+def _write_ext(root: Path, manifest: dict | str, main: str = "extension.js", source: str = "const x = 1;\n") -> None:
+    if isinstance(manifest, dict):
+        (root / "package.json").write_text(json.dumps(manifest), encoding="utf-8")
+    else:
+        (root / "package.json").write_text(manifest, encoding="utf-8")
+    if main:
+        (root / main).write_text(source, encoding="utf-8")
+
+
+class ManifestFailClosedTests(unittest.TestCase):
+    def test_invalid_json_manifest_is_incomplete_not_allow(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _write_ext(root, "{ this is not valid json ]", main="extension.js")
+            report = scan_extension(root)
+        self.assertEqual(report.analysis_coverage["manifest_validation"]["status"], "invalid-json")
+        self.assertFalse(report.analysis_coverage["manifest_validation"]["valid"])
+        self.assertEqual(report.analysis_coverage["status"], "incomplete")
+        self.assertEqual(report.decision, "incomplete")
+        self.assertEqual(report.analysis_status, "incomplete")
+
+    def test_missing_manifest_fails_closed(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "extension.js").write_text("const x = 1;\n", encoding="utf-8")
+            report = scan_extension(root)
+        self.assertEqual(report.analysis_coverage["manifest_validation"]["status"], "missing")
+        self.assertEqual(report.decision, "incomplete")
+
+    def test_non_object_manifest_fails_closed(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _write_ext(root, "[1, 2, 3]", main="extension.js")
+            report = scan_extension(root)
+        self.assertEqual(report.analysis_coverage["manifest_validation"]["status"], "not-object")
+        self.assertEqual(report.decision, "incomplete")
+
+    def test_valid_manifest_reports_valid(self) -> None:
+        _manifest, status = _read_manifest_status(Path("/does/not/exist/package.json"))
+        self.assertEqual(status, "missing")
+
+    def test_empty_object_manifest_has_no_identity_and_fails_closed(self) -> None:
+        # Regression: an object that merely parses ({}) fabricated an identity
+        # (unknown.<dir>@0.0.0) and was reported allow/complete, violating the
+        # "invalid artifact identity must never allow" invariant.
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _write_ext(root, "{}", main="extension.js")
+            report = scan_extension(root)
+        self.assertEqual(report.analysis_coverage["manifest_validation"]["status"], "missing-identity")
+        self.assertFalse(report.analysis_coverage["manifest_validation"]["valid"])
+        self.assertEqual(report.analysis_coverage["status"], "incomplete")
+        self.assertNotEqual(report.decision, "allow")
+        self.assertEqual(report.decision, "incomplete")
+
+    def test_partial_identity_manifest_fails_closed(self) -> None:
+        for manifest in (
+            '{"name":"n","version":"1.0.0"}',            # no publisher
+            '{"publisher":"p","version":"1.0.0"}',       # no name
+            '{"publisher":"p","name":"n"}',              # no version
+            '{"publisher":"","name":"n","version":"1"}', # empty publisher
+            '{"publisher":"p","name":"n","version":123}', # non-string version
+        ):
+            with TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                _write_ext(root, manifest, main="extension.js")
+                report = scan_extension(root)
+            self.assertEqual(
+                report.analysis_coverage["manifest_validation"]["status"],
+                "missing-identity",
+                msg=f"manifest {manifest!r} should lack identity",
+            )
+            self.assertEqual(report.decision, "incomplete", msg=f"manifest {manifest!r}")
+
+    def test_vsix_with_identityless_manifest_fails_closed(self) -> None:
+        with TemporaryDirectory() as tmp:
+            vsix = Path(tmp) / "x.vsix"
+            with zipfile.ZipFile(vsix, "w") as archive:
+                archive.writestr("extension/package.json", "{}")
+                archive.writestr("extension/extension.js", "const x = 1;\n")
+            report = scan_vsix(vsix)
+        self.assertEqual(report.analysis_coverage["manifest_validation"]["status"], "missing-identity")
+        self.assertEqual(report.decision, "incomplete")
+
+    def test_visual_studio_vsix_without_package_json_produces_canonical_report(self) -> None:
+        manifest = """
+        <PackageManifest Version="2.0.0" xmlns="http://schemas.microsoft.com/developer/vsx-schema/2011">
+          <Metadata>
+            <Identity Id="QodoGen.52e802ef" Version="0.14.2" Publisher="Qodo (formerly Codium)" />
+            <DisplayName>Qodo - AI Code Review</DisplayName>
+            <Description>Visual Studio code review extension.</Description>
+          </Metadata>
+          <Installation ExtensionType="VSSDK+VisualStudio.Extensibility" />
+        </PackageManifest>
+        """
+        with TemporaryDirectory() as tmp:
+            vsix = Path(tmp) / "qodo.vsix"
+            with zipfile.ZipFile(vsix, "w") as archive:
+                archive.writestr("extension.vsixmanifest", manifest)
+                archive.writestr("QodoGenVS.dll", b"MZ" + b"\0" * 32)
+                archive.writestr(".vsextension/extension.json", "{\"entryPoint\": {}}")
+            report = scan_vsix(
+                vsix,
+                artifact_origin="archive_artifact",
+                expected_extension_id="Codium.qodogen",
+                expected_version="0.14.2",
+            )
+
+        self.assertEqual(report.extension_id, "Codium.qodogen")
+        self.assertEqual(report.version, "0.14.2")
+        self.assertEqual(report.analysis_coverage["status"], "complete")
+        self.assertEqual(report.analysis_coverage["artifact_format"], "visual-studio-vsix")
+        self.assertEqual(report.analysis_coverage["execution_scope"], "static-package")
+        self.assertEqual(report.analysis_coverage["manifest_validation"]["format"], "visual-studio-vsix")
+        self.assertFalse(report.artifact_inventory["scan_incomplete"])
+
+    def test_visual_studio_vsix_rejects_marketplace_version_mismatch(self) -> None:
+        manifest = """
+        <PackageManifest xmlns="http://schemas.microsoft.com/developer/vsx-schema/2011">
+          <Metadata><Identity Id="QodoGen.abc" Version="0.14.2" Publisher="Codium" /></Metadata>
+        </PackageManifest>
+        """
+        with TemporaryDirectory() as tmp:
+            vsix = Path(tmp) / "qodo.vsix"
+            with zipfile.ZipFile(vsix, "w") as archive:
+                archive.writestr("extension.vsixmanifest", manifest)
+            with self.assertRaisesRegex(ValueError, "version does not match"):
+                scan_vsix(
+                    vsix,
+                    artifact_origin="archive_artifact",
+                    expected_extension_id="Codium.qodogen",
+                    expected_version="0.14.3",
+                )
+
+    def test_full_identity_manifest_is_valid(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _write_ext(root, {"publisher": "p", "name": "n", "version": "1.0.0", "main": "extension.js"})
+            report = scan_extension(root)
+        self.assertEqual(report.analysis_coverage["manifest_validation"]["status"], "valid")
+
+
+class ProviderStatusTests(unittest.TestCase):
+    def test_missing_node_marks_js_ast_failed(self) -> None:
+        record = _javascript_ast_provider_status(["node-missing"], ["extension.js"])
+        self.assertEqual(record["status"], "failed")
+        self.assertTrue(record["required"])
+        self.assertIn("Node runtime unavailable", record["error"])
+        self.assertEqual(record["failed_paths"], ["extension.js"])
+
+    def test_generated_entrypoint_resource_skip_names_its_budget(self) -> None:
+        record = _javascript_ast_provider_status(["generated-resource-skipped"], ["dist/extension.js"])
+        self.assertEqual(record["status"], "completed")
+        self.assertEqual(record["failed_files"], 0)
+        self.assertEqual(record["skipped_files"], 1)
+        self.assertIn("generated file(s)", record["note"])
+        self.assertEqual(record["skipped_paths"], ["dist/extension.js"])
+        self.assertIn("generated_entrypoint_max_bytes", record)
+
+    def test_ast_resource_skip_is_disclosed_and_fails_required_provider(self) -> None:
+        record = _javascript_ast_provider_status(["resource-skipped"], ["large.js"])
+
+        self.assertEqual(record["status"], "failed")
+        self.assertEqual(record["failed_files"], 1)
+        self.assertEqual(record["failed_paths"], ["large.js"])
+        self.assertIn("memory-safety limit", record["error"])
+        self.assertIn("max_input_bytes_per_file", record)
+
+    def test_all_ok_completes(self) -> None:
+        record = _javascript_ast_provider_status(["ok", "ok"])
+        self.assertEqual(record["status"], "completed")
+
+    def test_no_js_files_completes(self) -> None:
+        record = _javascript_ast_provider_status([])
+        self.assertEqual(record["status"], "completed")
+        self.assertEqual(record["analyzed_files"], 0)
+
+    def test_js_ast_failure_makes_scan_incomplete(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _write_ext(root, {"publisher": "ex", "name": "n", "version": "1.0.0", "main": "extension.js"})
+            with patch("ide_scanner.scanner.analyze_js_source_status", return_value=([], "node-missing")):
+                report = scan_extension(root)
+        provider = report.analysis_coverage["providers"]["javascript_ast"]
+        self.assertEqual(provider["status"], "failed")
+        self.assertEqual(report.analysis_coverage["status"], "incomplete")
+        self.assertNotEqual(report.decision, "allow")
+
+    def test_unparsed_is_disclosed_not_silently_completed(self) -> None:
+        # A file the plain-JS parser cannot read (TypeScript/JSX or invalid
+        # syntax) must be counted and disclosed, never reported as a clean
+        # successful AST parse. Regression guard for the fail-quiet gap where
+        # the walker's exit-0 "parse failed" payload was treated as "ok".
+        record = _javascript_ast_provider_status(["ok", "unparsed"])
+        self.assertEqual(record["status"], "completed")
+        self.assertEqual(record["unparsed_files"], 1)
+        self.assertIn("could not read", record["note"])
+
+    def test_unparsed_alone_does_not_fail_typescript_extension(self) -> None:
+        # A pure-TypeScript extension must not be flipped to a hard AST failure
+        # just because acorn is JS-only; the raw-text layer still covers it.
+        record = _javascript_ast_provider_status(["unparsed", "unparsed"])
+        self.assertEqual(record["status"], "completed")
+        self.assertEqual(record["failed_files"], 0)
+        self.assertEqual(record["unparsed_files"], 2)
+
+    def test_unparsed_status_from_real_walker_on_typescript(self) -> None:
+        from ide_scanner.ast_analyzer import analyze_js_source_status, node_available
+
+        if not node_available():
+            self.skipTest("node runtime required")
+        _findings, status = analyze_js_source_status("a.ts", "const x: number = 1;\n")
+        self.assertEqual(status, "unparsed")
+
+    def test_unparsed_declared_entrypoint_forces_review(self) -> None:
+        # An entrypoint the AST layer cannot parse loses structural evasion
+        # detection on the primary code path. It must surface as a review nudge
+        # so the scan cannot reach "allow" on raw-text coverage alone.
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _write_ext(
+                root,
+                {"publisher": "ex", "name": "n", "version": "1.0.0", "main": "extension.js"},
+                main="extension.js",
+                source="const x = 1;\n",
+            )
+            with patch(
+                "ide_scanner.scanner.analyze_js_source_status",
+                return_value=([], "unparsed"),
+            ):
+                report = scan_extension(root)
+        rule_ids = {f.rule_id for f in report.findings}
+        self.assertIn("entrypoint-ast-unparsed", rule_ids)
+        self.assertIn(report.decision, {"review", "block"})
+        self.assertNotEqual(report.decision, "allow")
+        # The provider itself stays completed -- the gate is the finding.
+        self.assertEqual(
+            report.analysis_coverage["providers"]["javascript_ast"]["status"],
+            "completed",
+        )
+
+    def test_unparsed_non_entrypoint_does_not_nudge_review(self) -> None:
+        # A non-entrypoint unparsed file is covered by raw-text rules and must
+        # NOT emit the entrypoint nudge -- only declared entrypoints do.
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "package.json").write_text(
+                json.dumps({"publisher": "ex", "name": "n", "version": "1.0.0", "main": "extension.js"}),
+                encoding="utf-8",
+            )
+            (root / "extension.js").write_text("const x = 1;\n", encoding="utf-8")
+            (root / "helper.ts").write_text("const y: number = 2;\n", encoding="utf-8")
+
+            def fake_status(rel, text):
+                if rel.endswith(".ts"):
+                    return [], "unparsed"
+                return [], "ok"
+
+            with patch("ide_scanner.scanner.analyze_js_source_status", side_effect=fake_status):
+                report = scan_extension(root)
+        rule_ids = {f.rule_id for f in report.findings}
+        self.assertNotIn("entrypoint-ast-unparsed", rule_ids)
+
+    def test_generated_entrypoint_budget_skip_is_disclosed_without_incomplete_scan(self) -> None:
+        # Generated bundles remain covered by bounded analyzers when the AST
+        # tree would exceed its memory budget. A declared activation path gets
+        # a review nudge, but the provider is not falsely reported as failed.
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "dist").mkdir()
+            _write_ext(
+                root,
+                {"publisher": "ex", "name": "generated", "version": "1.0.0", "main": "dist/extension.js"},
+                main="dist/extension.js",
+                source="const x = 1;\n",
+            )
+            with patch("ide_scanner.scanner._is_generated_code_blob", return_value=True), patch(
+                "ide_scanner.scanner.GENERATED_ENTRYPOINT_AST_MAX_BYTES", 1
+            ):
+                report = scan_extension(root)
+        provider = report.analysis_coverage["providers"]["javascript_ast"]
+        self.assertEqual(provider["status"], "completed")
+        self.assertEqual(provider["skipped_files"], 1)
+        self.assertEqual(report.analysis_coverage["status"], "complete")
+        self.assertIn("entrypoint-ast-unparsed", {f.rule_id for f in report.findings})
+        self.assertNotEqual(report.decision, "allow")
+
+
+class CoverageHonestyTests(unittest.TestCase):
+    def test_exact_known_bad_artifact_remains_blocked_when_analysis_is_incomplete(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _write_ext(
+                root,
+                {"publisher": "ex", "name": "known-bad", "version": "1.0.0"},
+                source="known bad payload",
+            )
+            digest = hashlib.sha256((root / "extension.js").read_bytes()).hexdigest()
+            providers = (
+                [],
+                {
+                    "semgrep": {"provider": "semgrep", "status": "failed", "required": True},
+                    "yara": {"provider": "yara", "status": "completed", "required": True},
+                },
+            )
+            with patch("ide_scanner.scanner.run_static_providers", return_value=providers):
+                report = scan_extension(
+                    root,
+                    known_bad_hashes={
+                        digest: {"source": "unit-test", "classification": "malware"},
+                    },
+                )
+        self.assertEqual(report.verdict, "malicious")
+        self.assertEqual(report.analysis_status, "incomplete")
+        self.assertEqual(report.decision, "block")
+        self.assertIn("known-bad", report.decision_reason)
+
+    def test_credential_prompt_without_dataflow_remains_incomplete_when_analysis_is_incomplete(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _write_ext(
+                root,
+                {
+                    "publisher": "ex",
+                    "name": "credential-dropper",
+                    "version": "1.0.0",
+                    "activationEvents": ["*"],
+                },
+                source=(
+                    "const vscode=require('vscode'); const https=require('https');"
+                    "const cp=require('child_process');"
+                    "vscode.window.showInputBox({prompt:'Enter API token'});"
+                    "https.get('https://example.com/tool',()=>cp.execFile('/tmp/tool'));"
+                ),
+            )
+            providers = (
+                [],
+                {
+                    "semgrep": {"provider": "semgrep", "status": "failed", "required": True},
+                    "yara": {"provider": "yara", "status": "completed", "required": True},
+                },
+            )
+            with patch("ide_scanner.scanner.run_static_providers", return_value=providers):
+                report = scan_extension(root)
+        self.assertEqual(report.verdict, "suspicious")
+        self.assertEqual(report.analysis_status, "incomplete")
+        self.assertEqual(report.decision, "incomplete")
+        self.assertNotIn("preventive policy", report.decision_reason)
+
+    def test_readme_preview_is_captured_without_treating_it_as_executable_code(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "package.json").write_text(
+                json.dumps({"publisher": "ex", "name": "docs", "version": "1.0.0"}),
+                encoding="utf-8",
+            )
+            (root / "README.md").write_text(
+                "# Documentation\n\nExample only: eval(Buffer.from('x')).",
+                encoding="utf-8",
+            )
+            report = scan_extension(root)
+        previews = report.artifact_inventory["source_previews"]
+        readme_preview = next(item for item in previews if item["path"] == "README.md")
+        readme_file = next(item for item in report.artifact_inventory["_all_file_hashes"] if item["path"] == "README.md")
+        self.assertEqual(readme_preview["content_sha256"], readme_file["sha256"])
+        self.assertNotIn("README.md", report.analysis_coverage["executable_candidates"])
+        self.assertFalse(any("README.md" in finding.file_refs for finding in report.findings))
+
+    def test_lowercase_root_readme_is_reserved_before_preview_limit(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "package.json").write_text(
+                json.dumps({"publisher": "ex", "name": "docs", "version": "1.0.0"}),
+                encoding="utf-8",
+            )
+            for index in range(45):
+                (root / f"a{index:02}.json").write_text(
+                    json.dumps({"index": index}),
+                    encoding="utf-8",
+                )
+            (root / "readme.md").write_text("# Lowercase documentation\n", encoding="utf-8")
+            report = scan_extension(root)
+        previews = report.artifact_inventory["source_previews"]
+        self.assertLessEqual(len(previews), 40)
+        readme_preview = next(item for item in previews if item["path"] == "readme.md")
+        readme_file = next(item for item in report.artifact_inventory["_all_file_hashes"] if item["path"] == "readme.md")
+        self.assertEqual(readme_preview["content_sha256"], readme_file["sha256"])
+
+    def test_generated_only_extension_not_reported_complete(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            # Manifest points main at a minified bundle; only generated code is reachable.
+            (root / "package.json").write_text(
+                json.dumps({"publisher": "ex", "name": "n", "version": "1.0.0"}), encoding="utf-8"
+            )
+            (root / "app.min.js").write_text("var a=1;var b=2;\n", encoding="utf-8")
+            report = scan_extension(root)
+        coverage = report.analysis_coverage
+        self.assertIn("app.min.js", coverage["excluded_generated_files"])
+        self.assertEqual(coverage["coverage_percent"], 0)
+        self.assertEqual(coverage["status"], "incomplete")
+
+    def test_empty_denominator_with_no_code_stays_complete(self) -> None:
+        coverage = {
+            "executable_candidates": [],
+            "analyzed_executable_files": [],
+            "missing_entrypoints": [],
+            "read_failures": [],
+            "oversized_files": [],
+            "excluded_generated_files": [],
+            "providers": {},
+            "manifest_validation": {"valid": True, "status": "valid"},
+        }
+        _finalize_analysis_coverage(coverage)
+        self.assertEqual(coverage["coverage_percent"], 100)
+        self.assertEqual(coverage["executable_file_coverage_percent"], 100)
+        self.assertTrue(coverage["required_providers_complete"])
+        self.assertEqual(coverage["status"], "complete")
+
+    def test_empty_denominator_with_a_scan_failure_is_not_full_coverage(self) -> None:
+        coverage = {
+            "status": "incomplete",
+            "coverage_percent": 0,
+            "executable_candidates": [],
+            "analyzed_executable_files": [],
+            "missing_entrypoints": [],
+            "read_failures": [],
+            "oversized_files": [],
+            "excluded_generated_files": [],
+            "limitations": ["Scan worker exceeded its bounded budget."],
+            "providers": {},
+            "manifest_validation": {"valid": False, "status": "scan-aborted"},
+        }
+        _finalize_analysis_coverage(coverage)
+        self.assertEqual(coverage["coverage_percent"], 0)
+        self.assertEqual(coverage["executable_file_coverage_percent"], 0)
+        self.assertEqual(coverage["status"], "incomplete")
+
+    def test_file_coverage_does_not_claim_required_provider_completion(self) -> None:
+        coverage = {
+            "executable_candidates": ["extension.js"],
+            "analyzed_executable_files": ["extension.js"],
+            "missing_entrypoints": [],
+            "read_failures": [],
+            "oversized_files": [],
+            "excluded_generated_files": [],
+            "providers": {
+                "semgrep": {
+                    "provider": "semgrep",
+                    "required": True,
+                    "status": "failed",
+                    "error": "timed out",
+                },
+            },
+            "manifest_validation": {"valid": True, "status": "valid"},
+        }
+        _finalize_analysis_coverage(coverage)
+        self.assertEqual(coverage["executable_file_coverage_percent"], 100)
+        self.assertFalse(coverage["required_providers_complete"])
+        self.assertEqual(coverage["completed_required_providers"], [])
+        self.assertEqual(coverage["status"], "incomplete")
+        self.assertIn("Required provider semgrep did not complete", coverage["limitations"])
+
+    def test_late_provider_success_clears_provisional_failure(self) -> None:
+        coverage = {
+            "executable_candidates": ["extension.js"],
+            "analyzed_executable_files": ["extension.js"],
+            "missing_entrypoints": [],
+            "read_failures": [],
+            "oversized_files": [],
+            "excluded_generated_files": [],
+            "limitations": ["Required provider dependency_intelligence did not complete"],
+            "providers": {
+                "dependency_intelligence": {
+                    "provider": "dependency_intelligence",
+                    "required": True,
+                    "status": "completed",
+                },
+            },
+            "manifest_validation": {"valid": True, "status": "valid"},
+        }
+        with patch.dict("os.environ", {"IDE_SCANNER_REQUIRE_PROVIDERS": "dependency_intelligence"}, clear=False):
+            _finalize_analysis_coverage(coverage)
+        self.assertTrue(coverage["required_providers_complete"])
+        self.assertEqual(coverage["limitations"], [])
+        self.assertEqual(coverage["status"], "complete")
+
+
+class BoundedReadTests(unittest.TestCase):
+    def test_read_text_caps_prefix(self) -> None:
+        with TemporaryDirectory() as tmp:
+            big = Path(tmp) / "big.js"
+            with patch("ide_scanner.scanner.MAX_TEXT_BYTES", 16):
+                big.write_text("a" * 1000, encoding="utf-8")
+                text = _read_text(big)
+        self.assertEqual(len(text), 16)
+
+
+class InventoryIsolationTests(unittest.TestCase):
+    def test_artifact_hashing_runs_in_bounded_worker(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            artifact = root / "extension.js"
+            artifact.write_text("const x = 1;", encoding="utf-8")
+            payload = {
+                "schema_version": "1",
+                "status": "complete",
+                "inventory": {"package_hash": "a" * 64, "_all_file_hashes": []},
+            }
+            completed = subprocess.CompletedProcess([], 0, json.dumps(payload), "")
+            with patch("ide_scanner.scanner.run_bounded_process", return_value=completed) as bounded:
+                inventory = _artifact_inventory(root, [artifact])
+        self.assertEqual(inventory["package_hash"], "a" * 64)
+        kwargs = bounded.call_args.kwargs
+        self.assertEqual(kwargs["timeout"], 300)
+        self.assertEqual(kwargs["memory_limit_mb"], 768)
+        self.assertIn("inventory", bounded.call_args.args[0])
+
+    def test_artifact_worker_failure_is_fail_closed(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            artifact = root / "extension.js"
+            artifact.write_text("const x = 1;", encoding="utf-8")
+            failed = subprocess.CompletedProcess([], 1, '{"status":"failed","error":"hash failed"}', "")
+            with patch("ide_scanner.scanner.run_bounded_process", return_value=failed):
+                with self.assertRaisesRegex(ValueError, "hash failed"):
+                    _artifact_inventory(root, [artifact])
+
+    def test_requested_deep_provider_failure_makes_result_incomplete(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _write_ext(
+                root,
+                {"publisher": "ex", "name": "deep", "version": "1.0.0", "main": "extension.js"},
+            )
+            report = scan_targets(
+                paths=[root],
+                required_providers={"dependency_intelligence"},
+            )
+
+        extension = report["extensions"][0]
+        provider = extension["analysis_coverage"]["providers"]["dependency_intelligence"]
+        self.assertTrue(provider["required"])
+        self.assertEqual(extension["analysis_status"], "incomplete")
+        self.assertEqual(extension["decision"], "incomplete")
+        self.assertIn("dependency_intelligence", extension["decision_reason"])
+
+    def test_one_bad_extension_does_not_abort_inventory(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            good = root / "good"
+            good.mkdir()
+            _write_ext(good, {"publisher": "ex", "name": "good", "version": "1.0.0", "main": "extension.js"})
+            bad = root / "bad"
+            bad.mkdir()
+            _write_ext(bad, {"publisher": "ex", "name": "bad", "version": "1.0.0", "main": "extension.js"})
+
+            real_scan = scan_extension
+
+            def flaky(path, *args, **kwargs):
+                if path.name == "bad":
+                    raise RuntimeError("boom")
+                return real_scan(path, *args, **kwargs)
+
+            with patch("ide_scanner.scanner.scan_extension", side_effect=flaky):
+                report = scan_targets(paths=[good, bad])
+
+        by_id = {row["extension_id"]: row for row in report["extensions"]}
+        self.assertIn("ex.good", by_id)
+        # The bad one is isolated as an incomplete placeholder, not an abort.
+        self.assertTrue(any(row["decision"] == "incomplete" for row in report["extensions"]))
+        self.assertEqual(len(report["extensions"]), 2)
+
+
+class VsixArchiveHardeningTests(unittest.TestCase):
+    def test_extraction_runs_in_bounded_worker(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            vsix = root / "safe.vsix"
+            destination = root / "out"
+            destination.mkdir()
+            with zipfile.ZipFile(vsix, "w") as archive:
+                archive.writestr("extension/package.json", '{}')
+            with patch("ide_scanner.scanner.run_bounded_process") as bounded:
+                bounded.return_value = subprocess.CompletedProcess(
+                    [], 0, '{"schema_version":"1","status":"complete","anomalies":{}}', ""
+                )
+                self.assertEqual(_safe_extract_vsix(vsix, destination), {})
+        kwargs = bounded.call_args.kwargs
+        self.assertEqual(kwargs["timeout"], 180)
+        self.assertEqual(kwargs["memory_limit_mb"], 512)
+
+    def test_extraction_worker_failure_is_fail_closed(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            vsix = root / "bad.vsix"
+            vsix.write_bytes(b"not-used")
+            destination = root / "out"
+            destination.mkdir()
+            failed = subprocess.CompletedProcess([], 1, '{"status":"failed","error":"bad archive"}', "")
+            with patch("ide_scanner.scanner.run_bounded_process", return_value=failed):
+                with self.assertRaisesRegex(ValueError, "bad archive"):
+                    _safe_extract_vsix(vsix, destination)
+
+    def test_vsix_instance_identity_is_stable_across_extractions(self) -> None:
+        with TemporaryDirectory() as tmp:
+            vsix = Path(tmp) / "stable.vsix"
+            with zipfile.ZipFile(vsix, "w") as archive:
+                archive.writestr(
+                    "extension/package.json",
+                    '{"publisher":"e","name":"stable","version":"1.0.0","main":"extension.js"}',
+                )
+                archive.writestr("extension/extension.js", "exports.activate = () => {};")
+
+            first = scan_vsix(vsix)
+            second = scan_vsix(vsix)
+
+        self.assertEqual(first.instance_id, second.instance_id)
+        self.assertEqual(first.artifact_hash, second.artifact_hash)
+
+    def _write_symlink_member(self, archive: zipfile.ZipFile, name: str, target: str) -> None:
+        info = zipfile.ZipInfo(name)
+        info.external_attr = (0o120777 << 16)  # symlink mode
+        archive.writestr(info, target)
+
+    def test_traversal_member_is_refused_and_recorded(self) -> None:
+        with TemporaryDirectory() as tmp:
+            dest = Path(tmp) / "out"
+            dest.mkdir()
+            vsix = Path(tmp) / "evil.vsix"
+            with zipfile.ZipFile(vsix, "w") as archive:
+                archive.writestr("extension/package.json", '{"publisher":"e","name":"n","version":"1.0.0"}')
+                archive.writestr("../../escape.txt", "pwned")
+            anomalies = _safe_extract_vsix(vsix, dest)
+        self.assertIn("traversal_members", anomalies)
+        self.assertFalse((Path(tmp) / "escape.txt").exists())
+
+    def test_symlink_member_is_refused_and_recorded(self) -> None:
+        with TemporaryDirectory() as tmp:
+            dest = Path(tmp) / "out"
+            dest.mkdir()
+            vsix = Path(tmp) / "evil.vsix"
+            with zipfile.ZipFile(vsix, "w") as archive:
+                archive.writestr("extension/package.json", '{"publisher":"e","name":"n","version":"1.0.0"}')
+                self._write_symlink_member(archive, "extension/link", "/etc/passwd")
+            anomalies = _safe_extract_vsix(vsix, dest)
+        self.assertIn("symlink_members", anomalies)
+        self.assertFalse((dest / "extension" / "link").exists())
+
+    def test_scan_vsix_marks_incomplete_on_archive_anomaly(self) -> None:
+        with TemporaryDirectory() as tmp:
+            vsix = Path(tmp) / "evil.vsix"
+            with zipfile.ZipFile(vsix, "w") as archive:
+                archive.writestr("extension/package.json", '{"publisher":"e","name":"n","version":"1.0.0","main":"extension.js"}')
+                archive.writestr("extension/extension.js", "const x = 1;\n")
+                self._write_symlink_member(archive, "extension/evil", "/etc/shadow")
+            report = scan_vsix(vsix)
+        self.assertIn("archive_anomalies", report.artifact_inventory)
+        self.assertEqual(report.analysis_coverage["status"], "incomplete")
+        self.assertNotEqual(report.decision, "allow")
+
+    def test_signature_status_never_implies_authenticity(self) -> None:
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "extension.vsixsignature").write_text("fake", encoding="utf-8")
+            status = _vsix_signature_status(root)
+        self.assertFalse(status["verified"])
+        self.assertFalse(status["verification_supported"])
+        self.assertNotIn("valid", status)
+
+
+if __name__ == "__main__":
+    unittest.main()

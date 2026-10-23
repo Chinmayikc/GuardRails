@@ -1,0 +1,32 @@
+name: Deliver monitoring notifications
+
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: notification-delivery
+  cancel-in-progress: false
+
+jobs:
+  deliver:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Dispatch pending alerts
+        env:
+          NOTIFICATION_CRON_SECRET: ${{ secrets.NOTIFICATION_CRON_SECRET }}
+        run: |
+          run_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          echo "Notification delivery workflow: ${run_url}"
+          curl --fail-with-body --silent --show-error \
+            --retry 2 --retry-all-errors \
+            --request POST \
+            --header "Authorization: Bearer ${NOTIFICATION_CRON_SECRET}" \
+            --header "X-Workflow-Run-Url: ${run_url}" \
+            https://abscissa.dev/api/cron/notifications

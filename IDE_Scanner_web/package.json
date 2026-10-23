@@ -1,0 +1,58 @@
+{
+  "name": "ide-scanner-web",
+  "version": "0.1.0",
+  "private": true,
+  "engines": {
+    "node": ">=22 <23"
+  },
+  "scripts": {
+    "dev": "next dev -H 127.0.0.1 -p 8765",
+    "dev:lan": "next dev -H 0.0.0.0 -p 8765",
+    "build": "node scripts/verify-node-runtime.mjs && next build --webpack",
+    "cf:build": "node scripts/verify-node-runtime.mjs && tsc --noEmit && CLOUDFLARE_BUILD=1 opennextjs-cloudflare build --config wrangler.jsonc",
+    "cf:preview": "npm run cf:build && opennextjs-cloudflare preview --config wrangler.jsonc",
+    "cf:deploy": "npm run cf:build && opennextjs-cloudflare deploy --config wrangler.jsonc",
+    "cf:typegen": "wrangler types --env-interface CloudflareEnv cloudflare-env.d.ts",
+    "start": "next start -H 127.0.0.1 -p 8765",
+    "start:lan": "next start -H 0.0.0.0 -p 8765",
+    "lint": "eslint",
+    "test": "vitest run",
+    "test:public-corpus": "vitest run lib/publicCorpusConsistency.test.ts",
+    "test:typography": "node scripts/typography-audit.mjs",
+    "test:e2e": "playwright test",
+    "launch:readiness": "node scripts/launch-readiness.mjs"
+  },
+  "dependencies": {
+    "@fontsource-variable/ibm-plex-sans": "^5.2.8",
+    "@fontsource/ibm-plex-mono": "^5.2.7",
+    "@fontsource/marck-script": "^5.3.0",
+    "@opennextjs/cloudflare": "^1.20.6",
+    "@supabase/ssr": "^0.12.0",
+    "@supabase/supabase-js": "^2.110.2",
+    "@vercel/analytics": "^2.0.1",
+    "dompurify": "^3.4.14",
+    "lucide-react": "^1.24.0",
+    "marked": "^18.0.6",
+    "motion": "^13.0.0",
+    "next": "^16.3.3",
+    "pg": "^8.23.0",
+    "react": "19.2.4",
+    "react-dom": "19.2.4",
+    "server-only": "^0.0.1",
+    "stripe": "^18.5.0"
+  },
+  "devDependencies": {
+    "@axe-core/playwright": "^4.12.1",
+    "@playwright/test": "^1.58.2",
+    "@types/node": "^20",
+    "@types/pg": "^8.23.1",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "eslint": "^9",
+    "eslint-config-next": "^16.3.3",
+    "tsx": "^4.23.13",
+    "typescript": "^5",
+    "vitest": "^4.1.11",
+    "wrangler": "^4.136.1"
+  }
+}

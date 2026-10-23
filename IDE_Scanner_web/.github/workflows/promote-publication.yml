@@ -1,0 +1,417 @@
+name: Validate and promote scanner publication
+
+# This workflow is intentionally manual. The scanner's fresh labelled holdout
+# is a release prerequisite, but downloading an artifact from another
+# repository and changing the active public release are two separate trust
+# boundaries. Validation is the default; activation requires an explicit
+# boolean input after the validation step has passed.
+on:
+  workflow_dispatch:
+    inputs:
+      scanner_run_id:
+        description: Scanner workflow-run ID containing scanner-publication-accuracy-gate
+        required: true
+        type: string
+      scanner_build:
+        description: Full scanner commit SHA attested by the holdout run
+        required: true
+        type: string
+      expected_reports:
+        description: Exact number of complete D1 reports to promote
+        required: true
+        default: "100"
+        type: string
+      activate:
+        description: Activate the validated Cloudflare publication release
+        required: true
+        default: false
+        type: boolean
+      queue_candidate_scan:
+        description: Stage the bounded cohort under this scanner build before activation; rerun after reports complete to validate
+        required: true
+        default: false
+        type: boolean
+      queue_bulk_scan:
+        description: Dispatch the bounded public catalog scan after activation
+        required: true
+        default: false
+        type: boolean
+      scan_batch_limit:
+        description: Maximum public Deep Scan jobs to queue
+        required: true
+        default: "100"
+        type: string
+      cohort_limit:
+        description: Maximum ranked extensions to refresh
+        required: true
+        default: "250"
+        type: string
+      candidate_offset:
+        description: Ranked Marketplace offset for a replacement cohort after runtime-incomplete candidates
+        required: false
+        default: "0"
+        type: string
+      marketplace_page_count:
+        description: Marketplace pages of 100 extensions to ingest; blank auto-sizes to the requested cohort
+        required: false
+        default: ""
+        type: string
+
+permissions:
+  contents: read
+  actions: write
+
+# D1 publication is an ordered pointer flip. Never let two validated releases
+# interleave their activation or registry chunk import transactions.
+concurrency:
+  group: guardrails-production-operations
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    if: ${{ github.ref == 'refs/heads/main' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    outputs:
+      validation_path: ${{ steps.validation.outputs.path }}
+    steps:
+      - name: Require cross-repository artifact credentials
+        env:
+          SCANNER_REPO_READ_TOKEN: ${{ secrets.SCANNER_REPO_READ_TOKEN }}
+        run: |
+          if [ -z "$SCANNER_REPO_READ_TOKEN" ]; then
+            echo "SCANNER_REPO_READ_TOKEN is required to download the scanner holdout artifact."
+            exit 1
+          fi
+      - name: Reject candidate queue and activation in one run
+        run: |
+          if [ "${{ inputs.queue_candidate_scan }}" = "true" ] && [ "${{ inputs.activate }}" = "true" ]; then
+            echo "queue_candidate_scan and activate are separate promotion phases; rerun after candidate reports complete."
+            exit 1
+          fi
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - name: Verify scanner holdout run provenance
+        env:
+          SCANNER_REPO_READ_TOKEN: ${{ secrets.SCANNER_REPO_READ_TOKEN }}
+          SCANNER_RUN_ID: ${{ inputs.scanner_run_id }}
+          SCANNER_BUILD: ${{ inputs.scanner_build }}
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          import re
+          import urllib.error
+          import urllib.request
+
+          run_id = os.environ["SCANNER_RUN_ID"].strip()
+          build = os.environ["SCANNER_BUILD"].strip().lower()
+          if not re.fullmatch(r"[0-9]+", run_id):
+              raise SystemExit("scanner_run_id must be a numeric GitHub Actions run ID")
+          if not re.fullmatch(r"[0-9a-f]{40}", build):
+              raise SystemExit("scanner_build must be a full 40-character commit SHA")
+          request = urllib.request.Request(
+              f"https://api.github.com/repos/preethamak/IDE_Scanner/actions/runs/{run_id}",
+              headers={
+                  "Accept": "application/vnd.github+json",
+                  "Authorization": f"Bearer {os.environ['SCANNER_REPO_READ_TOKEN']}",
+                  "User-Agent": "guardrails-publication-promoter",
+              },
+          )
+          try:
+              with urllib.request.urlopen(request, timeout=30) as response:
+                  run = json.load(response)
+          except (urllib.error.HTTPError, urllib.error.URLError) as exc:
+              raise SystemExit(f"could not verify scanner workflow run: {exc}") from exc
+          if run.get("name") != "Publication accuracy holdout":
+              raise SystemExit("scanner run is not the publication accuracy holdout workflow")
+          if run.get("status") != "completed" or run.get("conclusion") != "success":
+              raise SystemExit("scanner holdout workflow run did not complete successfully")
+          if run.get("event") not in {"push", "workflow_run"} or run.get("head_branch") != "main":
+              raise SystemExit("scanner holdout run is not a trusted main-branch push or automatic workflow-run")
+          if (run.get("head_repository") or {}).get("full_name") != "preethamak/IDE_Scanner":
+              raise SystemExit("scanner holdout run did not originate in the trusted scanner repository")
+          if str(run.get("head_sha", "")).lower() != build:
+              raise SystemExit("scanner workflow run SHA does not match scanner_build")
+          print(json.dumps({"run_id": run_id, "head_sha": build, "workflow": run["name"]}))
+          PY
+      - name: Download exact scanner accuracy gate
+        uses: actions/download-artifact@v4
+        with:
+          name: scanner-publication-accuracy-gate
+          path: scanner-accuracy-gate
+          repository: preethamak/IDE_Scanner
+          run-id: ${{ inputs.scanner_run_id }}
+          github-token: ${{ secrets.SCANNER_REPO_READ_TOKEN }}
+      - name: Validate gate identity
+        env:
+          SCANNER_BUILD: ${{ inputs.scanner_build }}
+          EXPECTED_REPORTS: ${{ inputs.expected_reports }}
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          import re
+          from pathlib import Path
+
+          build = os.environ["SCANNER_BUILD"].strip().lower()
+          if not re.fullmatch(r"[0-9a-f]{40}", build):
+              raise SystemExit("scanner_build must be a full 40-character commit SHA")
+          expected = int(os.environ["EXPECTED_REPORTS"])
+          if expected < 1 or expected > 10000:
+              raise SystemExit("expected_reports must be between 1 and 10000")
+          gate_path = Path("scanner-accuracy-gate/publication-accuracy-gate.json")
+          gate = json.loads(gate_path.read_text(encoding="utf-8"))
+          identity = gate.get("report_identity") or {}
+          if str(identity.get("scanner_build", "")).lower() != build:
+              raise SystemExit("scanner_build does not match the downloaded accuracy gate")
+          if gate.get("holdout", {}).get("status") != "fresh-labeled":
+              raise SystemExit("downloaded gate is not a fresh-labeled holdout gate")
+          if gate.get("gate", {}).get("passed") is not True:
+              raise SystemExit("downloaded accuracy gate did not pass")
+          print(json.dumps({"scanner_build": build, "expected_reports": expected}))
+          PY
+      - name: Build Cloudflare publication validation
+        id: validation
+        if: ${{ inputs.queue_candidate_scan != true }}
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: 26e873c5d55e5e386df482c9dbe8bcd7
+          CLOUDFLARE_SCAN_DATABASE: abscissa-scan-data
+          SCANNER_BUILD: ${{ inputs.scanner_build }}
+          EXPECTED_REPORTS: ${{ inputs.expected_reports }}
+        run: |
+          if [ -z "$CLOUDFLARE_API_TOKEN" ]; then
+            echo "CLOUDFLARE_API_TOKEN is required for publication validation."
+            exit 1
+          fi
+          node scripts/build-cloudflare-publication-validation.mjs \
+            --scanner-build "$SCANNER_BUILD" \
+            --expected-reports "$EXPECTED_REPORTS" \
+            --accuracy-gate scanner-accuracy-gate/publication-accuracy-gate.json \
+            --out cloudflare-publication-validation.json
+          echo "path=cloudflare-publication-validation.json" >> "$GITHUB_OUTPUT"
+      # Public runtime reports and the registry are Cloudflare D1-native. The
+      # Supabase tables remain a legacy compatibility mirror and are not used
+      # as a release prerequisite for reports produced by the D1 worker.
+      - uses: actions/upload-artifact@v4
+        if: ${{ inputs.queue_candidate_scan != true }}
+        with:
+          name: cloudflare-publication-validation
+          path: |
+            cloudflare-publication-validation.json
+            scanner-accuracy-gate/publication-accuracy-gate.json
+          retention-days: 30
+
+  queue-candidate-scan:
+    if: ${{ inputs.queue_candidate_scan == true }}
+    needs: validate
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - name: Queue staged candidate scans in Cloudflare D1
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: 26e873c5d55e5e386df482c9dbe8bcd7
+          CLOUDFLARE_SCAN_DATABASE: abscissa-scan-data
+          SCANNER_BUILD: ${{ inputs.scanner_build }}
+          SCAN_BATCH_LIMIT: ${{ inputs.scan_batch_limit }}
+          COHORT_LIMIT: ${{ inputs.cohort_limit }}
+          COHORT_OFFSET: ${{ inputs.candidate_offset }}
+          MARKETPLACE_PAGE_COUNT: ${{ inputs.marketplace_page_count }}
+        run: |
+          node scripts/queue-cloudflare-candidate-scans.mjs
+      - name: Dispatch scanner deep-scan workers
+        env:
+          GH_TOKEN: ${{ secrets.SCANNER_REPO_READ_TOKEN }}
+          SCANNER_BUILD: ${{ inputs.scanner_build }}
+        run: |
+          gh workflow run deep-scan.yml \
+            --repo preethamak/IDE_Scanner \
+            --ref main \
+            -f worker_count=16 \
+            -f jobs_per_worker=16 \
+            -f scanner_build="$SCANNER_BUILD"
+
+  activate:
+    if: ${{ github.ref == 'refs/heads/main' && inputs.activate == true }}
+    needs: validate
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Require production credentials
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          if [ -z "$CLOUDFLARE_API_TOKEN" ]; then
+            echo "CLOUDFLARE_API_TOKEN is required for activation."
+            exit 1
+          fi
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - name: Download validated publication
+        uses: actions/download-artifact@v4
+        with:
+          name: cloudflare-publication-validation
+          path: publication
+      - name: Activate immutable Cloudflare release
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: 26e873c5d55e5e386df482c9dbe8bcd7
+          CLOUDFLARE_SCAN_DATABASE: abscissa-scan-data
+        run: |
+          node scripts/activate-cloudflare-scan-publication.mjs \
+            --report publication/cloudflare-publication-validation.json \
+            --accuracy-gate publication/scanner-accuracy-gate/publication-accuracy-gate.json \
+            --apply
+
+  publish-registry:
+    if: ${{ github.ref == 'refs/heads/main' && inputs.activate == true }}
+    needs: activate
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Require production credentials
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          if [ -z "$CLOUDFLARE_API_TOKEN" ]; then
+            echo "CLOUDFLARE_API_TOKEN is required for registry publication."
+            exit 1
+          fi
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - name: Build registry snapshot from the active release
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: 26e873c5d55e5e386df482c9dbe8bcd7
+          CLOUDFLARE_SCAN_DATABASE: abscissa-scan-data
+          MARKETPLACE_PAGE_COUNT: ${{ inputs.marketplace_page_count }}
+        run: |
+          mkdir -p .tmp
+          node scripts/build-cloudflare-registry-snapshot.mjs \
+            --out .tmp/registry-snapshot.json
+      - name: Split registry import into recoverable D1 transactions
+        run: |
+          node scripts/import-public-registry-d1.mjs \
+            .tmp/registry-snapshot.json \
+            --split-dir .tmp/registry-sql \
+            --max-part-bytes 40000000
+      - name: Import registry chunks and flip the pointer last
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: 26e873c5d55e5e386df482c9dbe8bcd7
+        run: |
+          shopt -s nullglob
+          parts=(.tmp/registry-sql/part-*.sql)
+          if [ "${#parts[@]}" -lt 1 ]; then
+            echo "Registry import did not produce any SQL parts."
+            exit 1
+          fi
+          for part in "${parts[@]}"; do
+            echo "Applying $part"
+            npx wrangler d1 execute abscissa-registry --remote --file "$part"
+          done
+      - name: Verify the active registry publication is complete
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: 26e873c5d55e5e386df482c9dbe8bcd7
+        run: |
+          node - <<'NODE'
+          const fs = require("fs");
+          const snapshot = JSON.parse(fs.readFileSync(".tmp/registry-snapshot.json", "utf8"));
+          const chunkSize = 80000;
+          const countChunks = (value) => Math.max(1, Math.ceil(JSON.stringify(value).length / chunkSize));
+          const expectedSectionChunks = ["metrics", "feed", "inventory", "history", "catalog", "benchmark"]
+            .reduce((total, section) => total + countChunks(snapshot[section]), 0);
+          const expectedProductChunks = Object.values(snapshot.products || {})
+            .reduce((total, product) => total + countChunks(product), 0);
+          fs.writeFileSync(".tmp/registry-expected.json", JSON.stringify({
+            expectedSectionChunks,
+            expectedProductChunks,
+            expectedSections: 6,
+            expectedProducts: Object.keys(snapshot.products || {}).length,
+            scannerBuild: snapshot.inventory?.publication?.scanner_build || "",
+          }));
+          NODE
+          npx wrangler d1 execute abscissa-registry --remote --json \
+            --command "SELECT s.publication_id, (SELECT COUNT(*) FROM registry_section_chunks_v2 WHERE publication_id=s.publication_id) AS section_chunks, (SELECT COUNT(DISTINCT section) FROM registry_section_chunks_v2 WHERE publication_id=s.publication_id) AS sections, (SELECT COUNT(*) FROM registry_product_chunks_v2 WHERE publication_id=s.publication_id) AS product_chunks, (SELECT COUNT(DISTINCT extension_id) FROM registry_product_chunks_v2 WHERE publication_id=s.publication_id) AS products FROM registry_publication_state s WHERE s.state_key='active' LIMIT 1;" \
+            > .tmp/registry-state.json
+          node - <<'NODE'
+          const fs = require("node:fs");
+          const expected = JSON.parse(fs.readFileSync(".tmp/registry-expected.json", "utf8"));
+          const payload = JSON.parse(fs.readFileSync(".tmp/registry-state.json", "utf8"));
+          const row = payload.flatMap((item) => item.results || [])[0];
+          if (!row || !row.publication_id
+            || Number(row.sections) !== expected.expectedSections
+            || Number(row.section_chunks) !== expected.expectedSectionChunks
+            || Number(row.products) !== expected.expectedProducts
+            || Number(row.product_chunks) !== expected.expectedProductChunks) {
+            throw new Error(`Active registry publication is incomplete or partial: expected ${JSON.stringify(expected)}, received ${JSON.stringify(row)}`);
+          }
+          console.log(JSON.stringify({ ...row, scanner_build: expected.scannerBuild, expected }));
+          NODE
+
+  queue-bulk-scan:
+    if: ${{ github.ref == 'refs/heads/main' && inputs.activate == true && inputs.queue_bulk_scan == true }}
+    needs: [activate, publish-registry]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - name: Queue bounded public scans in Cloudflare D1
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: 26e873c5d55e5e386df482c9dbe8bcd7
+          CLOUDFLARE_SCAN_DATABASE: abscissa-scan-data
+          SCANNER_BUILD: ${{ inputs.scanner_build }}
+          SCAN_BATCH_LIMIT: ${{ inputs.scan_batch_limit }}
+          COHORT_LIMIT: ${{ inputs.cohort_limit }}
+          COHORT_OFFSET: ${{ inputs.candidate_offset }}
+          MARKETPLACE_PAGE_COUNT: ${{ inputs.marketplace_page_count }}
+          REQUIRE_ACTIVE_RELEASE: "true"
+        run: |
+          node scripts/queue-cloudflare-candidate-scans.mjs
+      - name: Dispatch scanner deep-scan workers
+        env:
+          GH_TOKEN: ${{ secrets.SCANNER_REPO_READ_TOKEN }}
+          SCANNER_BUILD: ${{ inputs.scanner_build }}
+          SCAN_BATCH_LIMIT: ${{ inputs.scan_batch_limit }}
+        run: |
+          runs=$(( (SCAN_BATCH_LIMIT + 255) / 256 ))
+          if [ "$runs" -lt 1 ] || [ "$runs" -gt 40 ]; then
+            echo "scan_batch_limit must produce between 1 and 40 worker runs."
+            exit 1
+          fi
+          for run in $(seq 1 "$runs"); do
+            echo "Dispatching worker run $run/$runs"
+            gh workflow run deep-scan.yml \
+              --repo preethamak/IDE_Scanner \
+              --ref main \
+              -f worker_count=16 \
+              -f jobs_per_worker=16 \
+              -f scanner_build="$SCANNER_BUILD"
+          done

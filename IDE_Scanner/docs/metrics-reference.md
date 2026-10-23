@@ -1,0 +1,549 @@
+# Metrics Reference
+
+This document explains how `ide-scanner` metrics should be interpreted by users, product surfaces, and future scanner implementations.
+
+## Can These Metrics Detect Malware?
+
+Yes, but only with the right claim boundary.
+
+`ide-scanner` should classify **confirmed malware** only when it has confirmed intelligence or artifact-level proof. Static code patterns can identify suspicious behavior and security flaws, but they must not be marketed as authoritative malware proof by themselves.
+
+The scanner should answer four different questions:
+
+| Question | Output | Required evidence |
+| --- | --- | --- |
+| Is this known malware? | `verdict=malicious` | Confirmed source, known-bad hash, marketplace malware removal, OSV `MAL-*`, trusted feed. |
+| Does this behave like malware? | `verdict=suspicious` | Dynamic observation or static behavior chain such as credential read + exfiltration. |
+| Does this create security risk? | `verdict=review` | Sensitive IDE capability, vulnerable dependency, lifecycle script, or an unexplained provenance gap. |
+| Is there no actionable evidence? | `verdict=clean` | No confirmed, observed, correlated, capability, or provenance finding. |
+
+## Enough or Not Enough?
+
+The metrics are enough for a strong first version if the product is honest about verdicts:
+
+- Good enough now: classify installed/local extensions into `clean`, `review`, `suspicious`, and `malicious`.
+- Good enough now: identify risky capabilities, static abuse chains, known removed extensions, and vulnerable or malicious runtime dependencies.
+- Not enough yet: guarantee every malicious extension is found.
+- Not enough yet: guarantee zero false positives for `review` or `suspicious`.
+- Not enough yet: call static heuristic hits authoritative malware.
+
+The right goal is **near-zero false positives for `malicious`**, not zero findings overall. `review` and `suspicious` are intentionally triage labels.
+
+## Verdicts
+
+### `clean`
+
+No actionable malware, abuse-chain, capability, dependency, or provenance evidence was found.
+
+Weak standalone findings can still be shown, but they should not raise the score. Example: one `process.env.API_TOKEN` reference without file read or network exfiltration.
+
+### `review`
+
+The extension has sensitive capability or supply-chain risk that needs context. This is not a malware accusation.
+
+Examples:
+
+- broad startup activation
+- lifecycle install script
+- native binary with an unexplained provenance or integrity gap
+- debugger/task/terminal contribution
+- agentic tool or MCP server
+- vulnerable runtime dependency
+- unsigned or unexplained binary artifact
+
+### `suspicious`
+
+The scanner found a realistic abuse path, but not confirmed malware intelligence.
+
+Examples:
+
+- credential reference + local file read + outbound network write
+- download + execute
+- obfuscation + dynamic execution + network
+- destructive file operation + archive/encrypt + network
+- sandbox-observed secret read followed by external network transfer
+
+### `malicious`
+
+The scanner matched confirmed intelligence or artifact-level proof.
+
+Allowed evidence:
+
+- Microsoft/marketplace removed as malware
+- OSV `MAL-*` malicious package
+- trusted malware feed match
+- known-bad VSIX/package hash
+- exact compromised extension artifact/version/hash from an authoritative advisory
+- exact artifact/version from internal confirmed corpus
+
+Static behavior alone should not produce `malicious`.
+
+## Scores
+
+### Malware Score
+
+`malware_score` should represent confidence that the artifact is malicious.
+
+| Score | Meaning |
+| ---: | --- |
+| 0 | No malware evidence. |
+| 1-39 | Weak context only. |
+| 40-64 | Review-grade risk. |
+| 65-89 | Suspicious abuse path. |
+| 90-100 | Confirmed or near-confirmed malicious artifact. |
+
+Recommended rule: `malware_score >= 90` should require confirmed intelligence, known-bad hash, or strong dynamic evidence plus corroboration.
+
+### Risk Score
+
+`risk_score` should represent blast radius if the extension is malicious, compromised, or vulnerable.
+
+A legitimate extension can have:
+
+```json
+{
+  "verdict": "review",
+  "malware_score": 0,
+  "risk_score": 55
+}
+```
+
+That means it is powerful, not necessarily malicious.
+
+## Evidence Classes
+
+| Evidence class | Meaning | Can mark malicious? |
+| --- | --- | --- |
+| `confirmed` | Trusted malware/removal/feed/hash evidence. | Yes. |
+| `observed` | Dynamic sandbox observed an abuse chain. | No, unless corroborated by confirmed evidence. |
+| `correlated` | Static same-path abuse chain. | No. |
+| `capability` | Sensitive IDE/runtime capability. | No. |
+| `provenance` | Artifact/source/signature/integrity evidence. | No, unless tied to known-bad artifact. |
+| `reputation` | Publisher/install/age/name-similarity context. | No. |
+| `weak` | Standalone code or metadata indicator. | No. |
+
+## Metric Groups
+
+### Confirmed Intelligence
+
+Purpose: identify known bad extensions and known malicious dependencies.
+
+Metrics:
+
+- `marketplace_removed_malware`
+- `marketplace_removed_non_malware`
+- `osv_malicious_dependency`
+- `trusted_threat_feed_hit`
+- `known_bad_hash`
+
+Product behavior:
+
+- Can produce `malicious` when the evidence says malware.
+- Non-malware removal types should be high risk, but the report should preserve the exact removal type.
+
+### Static Behavior Chains
+
+Purpose: detect code paths that look like real abuse.
+
+Metrics:
+
+- `credential_exfiltration_chain`
+- `download_and_execute`
+- `destructive_transfer_chain`
+- `obfuscation_execution_network`
+- `persistence_chain`
+- `supply_chain_dropper_chain`
+- `agent_data_exfil_chain`
+
+Product behavior:
+
+- Produces `suspicious`.
+- Should show file refs, functions or entrypoints, source/sink, and network destination if known.
+- Should not produce `malicious` without confirmed intelligence.
+
+### Sensitive IDE Capabilities
+
+Purpose: identify extensions with high blast radius.
+
+Metrics:
+
+- `broad_activation`
+- `startup_activation`
+- `terminal_task_debugger`
+- `uri_auth_webview`
+- `workspace_trust_bypass`
+- `agentic_tooling`
+- `webview_csp_missing` / `webview_csp_unsafe_directive`
+
+Product behavior:
+
+- Produces `review`.
+- Score increases when paired with network, file, shell, credential, or agent automation evidence.
+
+### Install-Time Behavior
+
+Purpose: catch risky behavior that runs before normal user interaction.
+
+Metrics:
+
+- `lifecycle_script_present`
+- `install_download_execute`
+- `install_secret_access`
+- `install_network_telemetry`
+- `install_shell_obfuscation`
+
+Product behavior:
+
+- Lifecycle script alone is `review`.
+- Install-time download-exec or secret access is `suspicious`.
+
+### Dependency and Vulnerability Metrics
+
+Purpose: identify vulnerable or malicious runtime dependencies.
+
+Metrics:
+
+- `runtime_vulnerable_dependency_exact`
+- `runtime_vulnerable_dependency_range`
+- `dev_dependency_vulnerable`
+- `malicious_dependency`
+- `mutable_dependency_source`
+- `dependency_delta_spike`
+- `bundled_dependency_hidden`
+
+Product behavior:
+
+- Exact runtime vulnerabilities are stronger than range-derived ones.
+- Dev dependency vulnerabilities should not affect runtime malware verdict.
+- Malicious runtime dependency can produce `malicious` only when exact/resolved.
+
+### Provenance and Artifact Integrity
+
+Purpose: detect mismatch between claimed source and shipped artifact.
+
+Metrics:
+
+- `repo_url_mismatch`
+- `source_vsix_diff_unexplained`
+- `attestation_missing`
+- `attestation_violation`
+- `binary_without_origin`
+- `reproducible_hash_match`
+
+Product behavior:
+
+- A native binary is recorded as a bounded low-severity governance note unless independent evidence shows an origin mismatch, tampering, or an abuse chain.
+- WebAssembly is recorded as executable capability and requires controlled runtime coverage. `wasm-loader` is emitted only when executable text visibly loads or instantiates a packaged module; the presence of a module alone is not a malware verdict.
+- Most other provenance issues are `review`.
+- Attestation violation or unexplained sensitive artifact additions can become `suspicious`.
+
+### Dynamic Sandbox Metrics
+
+Purpose: observe what the extension actually does in a safe environment.
+
+Metrics:
+
+- `observed_secret_read`
+- `observed_secret_exfil`
+- `observed_download_execute`
+- `observed_persistence`
+- `observed_destructive_behavior`
+- `runtime_network_attempt`
+
+Product behavior:
+
+- Dynamic findings are stronger than static findings.
+- Network attempts, process execution, and ordinary filesystem writes are
+  capability evidence and remain contextual until a higher-signal abuse chain
+  is observed.
+- Dynamic malicious behavior should usually be `suspicious`.
+- It becomes `malicious` only with confirmed intelligence, known-bad hash, or trusted analyst verdict.
+
+### Reputation and Posture
+
+Purpose: prioritize review and reduce noise.
+
+Metrics:
+
+- verified publisher
+- publisher age
+- install/rating anomaly (`install-rating-mismatch`)
+- name impersonation
+- maintained repo
+- branch protection
+- dangerous workflows
+- broad CI token permissions (`workflow-token-permissions-broad`)
+- security policy
+- license (`license-missing`)
+- binary artifacts in repo (`repo-binary-artifacts`)
+
+Product behavior:
+
+- Reputation and posture are modifiers.
+- They should never mark malware alone.
+- Marketplace reputation-only findings should not move an otherwise clean extension to `review`.
+- Verified publisher is a suppressor for reputation risk only; it does not hide confirmed malware or abuse-chain evidence.
+
+## Suppressors
+
+Suppressors reduce risk but must remain visible in the report.
+
+| Suppressor | Reduces |
+| --- | --- |
+| Verified publisher | Reputation risk. |
+| Signed VSIX or binary | Artifact/native-code risk. |
+| Checksum-pinned download | Download-exec risk. |
+| Expected vendor domain | Network/telemetry risk. |
+| Reproducible source-to-VSIX match | Provenance risk. |
+| User-triggered command path | Runtime behavior risk. |
+| Workspace-only scope | Filesystem/agent risk. |
+| Explicit approval required | Agent shell/network risk. |
+
+Suppressors must not override confirmed malware.
+
+## Current Implementation Coverage
+
+Implemented now:
+
+- local manifest scan
+- local static code scan
+- install-time chain detection for download-execute, secret access, telemetry, and obfuscated shell behavior
+- static behavior-chain detection for obfuscation+execution+network, persistence, and agent data exfiltration
+- high-specificity cross-function credential-harvesting detection requiring multiple credential families, home-directory enumeration, file reads, serialization, and an explicit outbound write
+- local artifact inventory with package hash, file count, byte count, and risky artifact hashes
+- VSIX quarantine extraction and scanning without installing the extension
+- VSIX artifact hash capture and known-bad VSIX hash matching
+- skipped vendored/generated/minified paths for lower noise
+- runtime dependencies only, not dev dependencies
+- exact local dependency resolution from `package-lock.json`
+- exact direct dependency resolution from installed `node_modules/*/package.json` when no lockfile exists
+- mutable dependency source detection for Git, URL, file, link, and workspace dependency specs
+- unpinned runtime dependency detection for `latest`, `*`, and `x` specs
+- native binary and packed archive artifact findings
+- repository/maintainer posture findings for missing repository metadata, missing security policy, missing license, dangerous GitHub workflows, broad GitHub Actions token permissions, and committed native binary artifacts
+- low-severity provenance notes for native artifacts without independent registry/vendor origin verification
+- webview capability findings for missing or unsafe Content-Security-Policy directives
+- marketplace install-count/rating mismatch reputation findings
+- agent-specific tool surface findings for shell, filesystem, network, MCP server, and prompt-injection sink risk
+- dynamic sandbox observations from `sandbox --allow-execute` through Bubblewrap, including lifecycle scripts, activation, registered command probes, and webview message probes; observations can also be imported through `--sandbox-observations` / `IDE_SCANNER_SANDBOX_OBSERVATIONS_FILE`
+- known-bad SHA-256 hash feed matching through `--known-bad-hashes` or `IDE_SCANNER_KNOWN_BAD_HASHES_FILE`
+- Microsoft removed package check (online checks run by default; disable with `--offline`)
+- marketplace removal type splitting, so `Malware`, `Suspicious`, and non-malware removals are not treated the same
+- marketplace metadata scoring (online, on by default): found/not found, verified publisher, install count, rating, and stale update context
+- verified publisher suppressor in `score_details.suppressors`
+- OSV dependency check (online, on by default)
+- report-level environment posture checks for Workspace Trust, automatic tasks, agent auto-approval, terminal auto-approval, and extension trust overrides
+- evidence classes: `confirmed`, `observed`, `correlated`, `capability`, `dependency`, `posture`, `provenance`, `reputation`, `weak`
+- separate `malware_score` and `risk_score`
+- current `score_details`
+- `malware_authority`
+- packaged, versioned scoring calibration with fail-closed schema and score-range validation
+- exact Marketplace VSIX SHA-256 verification against the version property before scanning
+- detached Marketplace signature-asset presence reporting without claiming cryptographic verification
+- sequential executable-source analysis that does not retain every source blob for the duration of a scan
+- a 32 MiB AST per-file input boundary and 1 GiB Node heap boundary; resource-skipped AST files fail required coverage closed
+- subprocess-isolated Semgrep and YARA analysis with timeout, memory, file-output, and process-tree boundaries
+- bounded yara-python worker output and fail-closed worker error reporting
+
+### Repeatable Corpus Audit
+
+After every corpus scan, produce a rule-volume and routing audit before changing thresholds:
+
+```bash
+PYTHONPATH=src python scripts/scan_corpus.py \
+  --all --jobs 4 --timeout 45 --out /path/to/static-scan.json
+PYTHONPATH=src python scripts/audit_report.py \
+  --report /path/to/static-scan.json \
+  --labels benchmarks/website-corpus/v1/frozen-input.json \
+  --corrections benchmarks/website-corpus/v1/label-corrections.json \
+  --out /path/to/report-audit.json
+```
+
+When labels include versions, the audit resolves them by exact
+`extension_id@version` before falling back to an extension-level label. Apply
+documented corrections explicitly; the auditor never silently rewrites frozen
+labels.
+
+For a reproducible release corpus, use an exact-artifact manifest instead of
+an ambient install directory:
+
+```json
+{
+  "schema_version": "guardrails.corpus-manifest.v1",
+  "artifacts": [
+    {
+      "path": "artifacts/publisher.extension-1.2.3.vsix",
+      "extension_id": "publisher.extension",
+      "version": "1.2.3",
+      "sha256": "<canonical scanner artifact SHA-256>"
+    }
+  ]
+}
+```
+
+Run it with `scan_corpus.py --manifest corpus.json`. Manifest paths must be
+files. The SHA-256 is the canonical scanner artifact identity: for a gzip-
+wrapped VSIX it is the hash of the unwrapped VSIX bytes, matching
+`artifact_identity.sha256` and `artifact_inventory.vsix_hash`. Every manifest
+row is checked against the scanned extension identity and canonical artifact
+hash; a mismatch is an explicit incomplete result and is never routed as clean.
+
+For a private directory of VSIX files, generate that manifest without using
+filenames as identity:
+
+```bash
+PYTHONPATH=src python scripts/build_corpus_manifest.py \
+  --path /secure/guardrails-corpus-v1/artifacts \
+  --out /secure/guardrails-corpus-v1/corpus.json
+```
+
+The builder reads only bounded `package.json` metadata and canonical hashes;
+it never installs or executes an artifact. Combine it with `scan_corpus.py
+--checkpoint-dir` to resume a large scan after worker failures.
+
+For public registry activation, the deterministic production gate is only the
+regression half of the evidence. Build a publication gate from that result and
+a separate, frozen, exact-artifact holdout:
+
+```bash
+PYTHONPATH=src python scripts/build_publication_accuracy_gate.py \
+  --regression-gate production-gate.json \
+  --holdout-gate holdout-gate.json \
+  --behavior-gate behavior-holdout-gate.json \
+  --holdout-corpus holdout-corpus.json \
+  --rule-audit holdout-rule-audit.json \
+  --out publication-accuracy-gate.json
+```
+
+The holdout manifest must be frozen before scanning, retain original bytes and
+SHA-256 values, document artifact-specific label evidence, contain both
+`known_safe` and `known_malicious` exact artifacts, and use non-fixture source
+types. Label evidence must use an approved independent source type such as
+`independent_review`, `independent_threat_report`, or a maintainer/advisory
+source paired with an independent hash report. An independent threat report
+that also publishes an OSV-compatible record is admissible when the source of
+record and exact artifact hash remain explicit; an operator assertion alone is
+not admissible. The script requires every holdout artifact to scan completely under one
+full scanner build and rejects an `unknown` build. The website publication
+scripts consume this combined artifact and will not activate a regression-only
+gate.
+
+For reproducible acquisition, prepare a private source specification with
+`guardrails.holdout-source.v1`, one exact HTTPS URL (plus optional exact-byte
+mirrors) and SHA-256 per artifact, and structured evidence (`source_type`,
+`source_url`, `retrieved_at`) for each label:
+
+```bash
+PYTHONPATH=src python scripts/freeze_accuracy_holdout.py \
+  --source private-holdout-source.json \
+  --output-dir /secure/guardrails-holdout-v1/artifacts \
+  --corpus /secure/guardrails-holdout-v1/holdout-corpus.json \
+  --manifest /secure/guardrails-holdout-v1/corpus-manifest.json
+```
+
+The freezer never executes the VSIX. It refuses redirects, non-HTTPS URLs,
+credentials in URLs, duplicate extension identities, and SHA-256 mismatches.
+Retain the artifact directory privately, run the corpus manifest through the
+isolated deep runtime path, and then build the holdout gate before the
+publication gate:
+
+```bash
+PYTHONPATH=src python scripts/scan_corpus.py \
+  --manifest /secure/guardrails-holdout-v1/corpus-manifest.json \
+  --profile deep --runtime --runtime-timeout 20 \
+  --checkpoint-dir /secure/guardrails-holdout-v1/checkpoints \
+  --out /secure/guardrails-holdout-v1/scan-report.json
+
+PYTHONPATH=src python -m ide_scanner benchmark holdout \
+  --corpus /secure/guardrails-holdout-v1/holdout-corpus.json \
+  --report /secure/guardrails-holdout-v1/scan-report.json \
+  --out /secure/guardrails-holdout-v1/holdout-gate.json \
+  --fail-on-regression
+```
+
+The holdout evaluator requires every exact artifact to be complete, keeps the
+scanner/policy/ruleset identity and hash in every result row, rejects a
+known-safe block or malicious allow, and requires evidence that the deep
+runtime path was enabled and external syscall tracing was available on the
+worker. The publication holdout must contain at least five
+independently labelled safe artifacts and five independently labelled harmful
+artifacts; a two-item spot check is not treated as ecosystem accuracy. The
+`--allow-static-only` option exists only for offline calibration and must not
+feed the publication gate. The final publication combiner revalidates each
+row's verdict, decision, completion state, and artifact hash, then recomputes
+safe-review, malicious-detection, malicious-block, and per-rule labelled
+fire-rate metrics from those rows instead of trusting an operator-edited
+summary. It also requires at least one labelled rule firing and rejects
+malformed or over-counted rule rows, so a release cannot hide behind aggregate
+rates without retaining the evidence that produced them. A safe review remains
+a measured triage-noise signal, not an automatic block; policy changes require
+adjudicated evidence.
+
+The production Deep Scan workflow supports 1, 4, 8, or 16 isolated worker
+shards. Scheduled runs use the 16-worker profile; an exact manual `job_id`
+should use one worker. Each shard still claims one job, downloads one exact
+artifact, runs the deep runtime path, and submits one immutable callback. The
+catalog refresh can queue up to 10,000 ranked releases, but registry
+activation still requires the independent holdout gate and a complete
+immutable release manifest.
+
+The corpus runner isolates each artifact in a killable subprocess. A timeout is
+recorded as `decision=incomplete`, never as clean. The audit reports raw finding
+volume separately from distinct affected extensions, completed-versus-incomplete
+routing, evidence classes, actionability, and labeled routing mismatches. Rule
+routing counts are deduplicated per extension, so repeated matches in one bundle
+cannot make a rule look more broadly harmful than it is. A mixed-outcome rule is
+a calibration candidate, not proof of a false positive; adjudicate the cited
+artifact before changing policy. Computed-call AST noise is aggregated to one
+contextual finding per file with a count and representative examples.
+
+Credential proximity is also deliberately separated from proven data flow:
+`credential-source-near-network` is a LOW hardening note because character
+proximity does not prove that a secret reaches a network sink. The correlated
+`credential-dataflow-to-network` rule remains review-level evidence.
+
+Implemented benchmark support:
+
+- version-pinned production corpus validation with safe, gray, and malicious labels
+- fail-closed regression gates for verdicts, decisions, analysis coverage, rule expectations, score bounds, and artifact hashes
+- explicit `not_scanned` tracking for optional real-world artifacts awaiting retention and calibration
+- normalized Protect Your Secrets public CSV adapter
+- credential-exposure benchmark runner against scanner JSON/report.zip
+- dashboard-ready `benchmark.zip`
+- `not_scanned` accounting for dataset entries absent from partial reports
+
+Still pending for broader production coverage:
+
+- cryptographic verification of the detached Marketplace VSIX signature and signer identity
+- source-to-VSIX provenance comparison
+- full calibration corpus beyond bundled fixtures and the public credential-exposure labels
+- client-specific runtime coverage for language-server startup and uninstall across all supported clients
+
+## Recommended Next Build Order
+
+1. Cryptographically verify the Marketplace signature asset and signer identity; package SHA-256 matching and signature presence are already recorded.
+2. Add source-to-VSIX provenance comparison.
+3. Expand the Bubblewrap runner to client-specific language-server startup and uninstall scenarios, while keeping command and webview probes bounded and synthetic.
+4. Expand benchmark corpora and publish precision/recall for each verdict and exposure vector.
+
+Numeric calibration changes must update the packaged policy version and run the
+known-safe and known-abuse regression scans. Authority gates are deliberately
+not configurable: only confirmed evidence may produce `malicious`, regardless
+of a rule's numeric score.
+
+## User-Facing Explanation Template
+
+Use this shape in reports:
+
+```text
+Verdict: suspicious
+Malware authority: non_authoritative
+Malware score: 82
+Risk score: 74
+Reason: Static analysis found a credential exfiltration chain.
+Evidence: extension.js references SSH keys, reads local files, and writes to an outbound network request.
+Why this is not called malicious: no confirmed malware feed, known-bad hash, or marketplace malware removal matched this artifact.
+Next action: install only in a sandbox or block until manually reviewed.
+```
+
+This keeps the product trustworthy because the explanation matches the evidence strength.

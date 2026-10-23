@@ -1,0 +1,73 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "abscissa-web-production",
+  // Keep the generated OpenNext worker behind the small edge-cache wrapper.
+  // The wrapper only caches anonymous public HTML and forwards all other
+  // requests unchanged.
+  "main": "worker.ts",
+  "compatibility_date": "2026-09-10",
+  "compatibility_flags": [
+    "nodejs_compat",
+    "allow_importable_env",
+    "global_fetch_strictly_public"
+  ],
+  "workers_dev": true,
+  "triggers": {
+    "crons": ["*/5 * * * *", "23 */6 * * *"]
+  },
+  "vars": {
+    "GITHUB_OAUTH_CLIENT_ID": "Ov23liWQ5kElxVniE4tx",
+    "GOOGLE_OAUTH_CLIENT_ID": "539877495650-9nrcag73os1umpgdi03lc2j4f9qien4s.apps.googleusercontent.com",
+    "GOOGLE_OAUTH_REDIRECT_URI": "https://abscissa.dev/api/auth/callback/google",
+    "NEXT_PUBLIC_SUPABASE_URL": "https://kmdujtabqaxgoeltbxpq.supabase.co",
+    "NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY": "sb_publishable_SFVIp0jbZBldUWVKHdwXBQ_ZQEvM_gS",
+    "AUTH_EMAIL_FROM": "hello@abscissa.dev",
+    "RESEND_FROM_EMAIL": "onboarding@resend.dev",
+    "NOTIFICATION_FROM_EMAIL": "hello@abscissa.dev"
+  },
+  "routes": [
+    {
+      "pattern": "abscissa.dev/*",
+      "zone_name": "abscissa.dev"
+    }
+  ],
+  "assets": {
+    "directory": ".open-next/assets",
+    "binding": "ASSETS"
+  },
+  "d1_databases": [
+    {
+      "binding": "ABSCISSA_REGISTRY",
+      "database_name": "abscissa-registry",
+      "database_id": "00dc29ae-0815-4393-a915-d0cc07b36556",
+      "migrations_dir": "d1/migrations-registry"
+    },
+    {
+      "binding": "ABSCISSA_SCAN_DATA",
+      "database_name": "abscissa-scan-data",
+      "database_id": "42467eb8-8beb-4fd8-8e5e-332458cac5f3",
+      "migrations_dir": "d1/migrations"
+    }
+  ],
+  "send_email": [
+    {
+      "name": "AUTH_EMAIL",
+      "remote": true,
+      "allowed_sender_addresses": ["hello@abscissa.dev"]
+    }
+  ],
+  "observability": {
+    "enabled": true
+  },
+  "services": [
+    {
+      "binding": "WORKER_SELF_REFERENCE",
+      "service": "abscissa-web-production"
+    },
+    {
+      "binding": "DEFAULT_WORKER",
+      "service": "ide-scanner-web-server",
+      "environment": "production"
+    }
+  ]
+}

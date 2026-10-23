@@ -1,0 +1,199 @@
+from __future__ import annotations
+
+from typing import Any
+
+from .models import ExtensionReport
+from .trust_tiers import derive_trust_tier
+from .capability_contracts import class_contract, classify_extension, expected_capabilities, extension_profile
+
+
+# These profiles explain intended power; they are not allowlists. A profile can
+# only produce an expected-capability outcome when registry identity, repository
+# ownership, artifact identity, and analysis coverage all agree and no
+# unexplained decision-relevant evidence remains.
+LEGACY_EXPECTED_CAPABILITY_PROFILES: dict[str, dict[str, Any]] = {
+    "dbaeumer.vscode-eslint": {
+        "id": "vscode-eslint-v1",
+        "publisher": "dbaeumer",
+        "repository_owners": ["microsoft/vscode-eslint"],
+        "capabilities": ["activation", "dynamic_code", "filesystem", "ide_contributions", "lifecycle_scripts", "process_execution"],
+    },
+    "eamodio.gitlens": {
+        "id": "gitlens-v1",
+        "publisher": "eamodio",
+        "repository_owners": ["gitkraken/vscode-gitlens", "eamodio/vscode-gitlens"],
+        "capabilities": ["activation", "credential_commands", "credential_configuration", "ide_contributions", "lifecycle_scripts", "process_execution"],
+    },
+    "ms-python.python": {
+        "id": "vscode-python-v1",
+        "publisher": "ms-python",
+        "repository_owners": ["microsoft/vscode-python"],
+        "capabilities": ["activation", "ide_contributions", "lifecycle_scripts", "native_code", "packed_artifacts", "process_execution"],
+    },
+    "rust-lang.rust-analyzer": {
+        "id": "rust-analyzer-v1",
+        "publisher": "rust-lang",
+        "repository_owners": ["rust-lang/rust-analyzer"],
+        "capabilities": ["activation", "ide_contributions", "native_code", "packed_artifacts", "process_execution"],
+    },
+    "semgrep.semgrep": {
+        "id": "semgrep-vscode-v1",
+        "publisher": "semgrep",
+        "repository_owners": ["semgrep/semgrep-vscode"],
+        "capabilities": ["activation", "ide_contributions", "lifecycle_scripts", "native_code", "packed_artifacts", "process_execution"],
+    },
+    "snyk-security.snyk-vulnerability-scanner": {
+        "id": "snyk-vscode-v1",
+        "publisher": "snyk-security",
+        "repository_owners": ["snyk/vscode-extension"],
+        "capabilities": ["activation", "credential_commands", "credential_configuration", "ide_contributions", "lifecycle_scripts", "native_code", "packed_artifacts", "process_execution"],
+    },
+    "sonarsource.sonarlint-vscode": {
+        "id": "sonarqube-vscode-v1",
+        "publisher": "sonarsource",
+        "repository_owners": ["sonarsource/sonarlint-vscode"],
+        "capabilities": ["activation", "ide_contributions", "lifecycle_scripts", "native_code", "packed_artifacts", "process_execution"],
+    },
+}
+
+# Compatibility name used by the trust-tier fallback for reports created
+# before capability-contract profiles were introduced.
+EXPECTED_CAPABILITY_PROFILES = LEGACY_EXPECTED_CAPABILITY_PROFILES
+
+_PROVENANCE_CONFLICT_RULES = {
+    "known-bad-artifact",
+    "marketplace-extension-not-found",
+    "marketplace-name-impersonation",
+    "marketplace-removed-malware",
+    "marketplace-removed-package",
+    "trusted-threat-feed-hit",
+}
+_EXPLAINABLE_CLASSES = {"capability", "reputation", "weak"}
+
+
+def apply_public_assessment(extension: ExtensionReport) -> None:
+    classification = classify_extension(extension)
+    profile = extension_profile(extension.extension_id) or LEGACY_EXPECTED_CAPABILITY_PROFILES.get(extension.extension_id.lower())
+    rule_ids = {finding.rule_id for finding in extension.findings}
+    evidence_classes = {_evidence_class(finding) for finding in extension.findings}
+    capability_ids = sorted(
+        str(item.get("id")) for item in extension.capabilities
+        if isinstance(item, dict) and item.get("id")
+    )
+    verified = "marketplace-verified-publisher" in rule_ids
+    conflicted = bool(rule_ids & _PROVENANCE_CONFLICT_RULES)
+    repository = extension.repository.lower().rstrip("/")
+    publisher_matches = bool(profile) and extension.publisher.lower() == str(profile["publisher"]).lower()
+    repository_matches = bool(profile) and any(
+        f"github.com/{owner.lower()}" in repository for owner in profile["repository_owners"]
+    )
+    coverage_complete = str(extension.analysis_coverage.get("status") or "") == "complete"
+    artifact_consistent = (
+        extension.artifact_identity.get("extension_id") == extension.extension_id
+        and extension.artifact_identity.get("version") == extension.version
+        and len(str(extension.artifact_identity.get("sha256") or "")) == 64
+    )
+    signature = extension.artifact_identity.get("signature") if isinstance(extension.artifact_identity, dict) else {}
+    package_integrity = signature.get("package_integrity") if isinstance(signature, dict) else {}
+    registry_integrity_consistent = not (
+        isinstance(package_integrity, dict)
+        and package_integrity.get("expected")
+        and package_integrity.get("matched") is False
+    )
+    established = bool(
+        profile and verified and publisher_matches and repository_matches
+        and coverage_complete and artifact_consistent and registry_integrity_consistent and not conflicted
+    )
+    provenance_tier = "conflicted" if conflicted else "established" if established else "verified" if verified else "unknown"
+    contract_class = str(profile.get("class") or classification["primary"]) if profile else str(classification["primary"])
+    expected = expected_capabilities(profile, contract_class) if profile else expected_capabilities(None, contract_class)
+    forbidden = set(class_contract(contract_class).get("forbidden", []))
+    matched = sorted(set(capability_ids) & expected)
+    # Generic classes only assert their forbidden surface. A formatter or
+    # language tool may legitimately expose capabilities not listed in the
+    # compact contract, while a theme exposing process/network/native powers is
+    # a meaningful declaration mismatch even without a hand-maintained profile.
+    unexpected_capabilities = (
+        sorted(set(capability_ids) & forbidden)
+        if contract_class != "unknown"
+        else []
+    )
+    unexplained_findings = sorted(
+        finding.rule_id for finding in extension.findings
+        if _evidence_class(finding) not in _EXPLAINABLE_CLASSES
+    )
+
+    extension.provenance = {
+        "tier": provenance_tier,
+        "publisher_verified": verified,
+        "publisher_matches_profile": publisher_matches,
+        "repository_matches_profile": repository_matches,
+        "artifact_identity_consistent": artifact_consistent,
+        "profile_id": str(profile["id"]) if profile else "",
+    }
+    prior_assessment = extension.capability_assessment if isinstance(extension.capability_assessment, dict) else {}
+    behavioral_verification = prior_assessment.get("behavioral_verification")
+    extension.capability_assessment = {
+        "profile_id": str(profile["id"]) if profile else "",
+        "observed": capability_ids,
+        "matched": matched,
+        "unexpected": unexpected_capabilities,
+        "unexplained_findings": unexplained_findings,
+        "classification": classification,
+        "contract_class": contract_class,
+        "expected": sorted(expected),
+        "forbidden_observed": sorted(set(capability_ids) & forbidden),
+    }
+    if isinstance(behavioral_verification, dict):
+        extension.capability_assessment["behavioral_verification"] = behavioral_verification
+
+    if extension.decision == "incomplete":
+        extension.public_outcome = "incomplete"
+        extension.decision_basis = "incomplete_analysis"
+        extension.evidence_confidence = "none"
+    elif extension.verdict == "malicious":
+        extension.public_outcome = "confirmed_threat"
+        extension.decision_basis = "authoritative_threat_evidence"
+        extension.evidence_confidence = "confirmed"
+    elif extension.decision == "block":
+        extension.public_outcome = "preventive_block"
+        extension.decision_basis = "high_specificity_abuse_path"
+        extension.evidence_confidence = "high"
+    elif unexpected_capabilities:
+        extension.public_outcome = "investigate"
+        extension.decision_basis = "capability_contract_mismatch"
+        extension.evidence_confidence = "medium"
+    elif (
+        extension.decision == "review"
+        and established
+        and not unexpected_capabilities
+        and not unexplained_findings
+        and evidence_classes <= _EXPLAINABLE_CLASSES
+    ):
+        extension.decision_reason = (
+            "Review is capability-based: the observed powerful behavior matches "
+            "the extension's established publisher and expected-capability profile."
+        )
+        extension.public_outcome = "expected_capability"
+        extension.decision_basis = "established_expected_capability"
+        extension.evidence_confidence = "contextual"
+    elif extension.decision == "review":
+        extension.public_outcome = "investigate"
+        extension.decision_basis = "unexplained_or_unestablished_behavior"
+        extension.evidence_confidence = str(extension.score_details.get("confidence") or "medium")
+    else:
+        extension.public_outcome = "clear"
+        extension.decision_basis = "no_actionable_evidence"
+        extension.evidence_confidence = "none"
+
+    tier = derive_trust_tier(extension)
+    extension.trust_tier = tier.tier
+    extension.trust_tier_label = tier.label
+    extension.trust_tier_reason = tier.reason
+
+
+def _evidence_class(finding: Any) -> str:
+    evidence = getattr(finding, "evidence", None)
+    if isinstance(evidence, dict) and isinstance(evidence.get("evidence_class"), str):
+        return str(evidence["evidence_class"])
+    return "weak"

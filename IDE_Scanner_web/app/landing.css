@@ -1,0 +1,271 @@
+/* ============================================================================
+   LANDING PAGE — scoped rebuild (.lp)
+   ----------------------------------------------------------------------------
+   Loaded LAST. Every rule is scoped under `.lp` so it cannot leak into or fight
+   any other page, and wins over legacy layers without needing !important.
+   Direction: problem-first product page. Confident, clean, human — not a
+   console, not a marketing brochure. Same canonical light palette:
+     brand lime  #e1f3ef  — decoration / fills / meters only, never text
+     brand ink   #24645f  — legible lime-family ink for small labels on white
+   ========================================================================== */
+
+.lp {
+  --lp-bg: #ffffff;
+  --lp-surface: #ffffff;
+  --lp-surface-2: #f6f8fa;
+  --lp-surface-3: #eef2f5;
+  --lp-line: #e2e7eb;
+  --lp-line-2: #cfd7dd;
+  --lp-text: #182433;
+  --lp-ink-2: #33414d;
+  --lp-muted: #55636f;
+  --lp-faint: #78848f;
+  --lp-brand: #e1f3ef;
+  --lp-brand-strong: #52b9a3;
+  --lp-brand-soft: #f1ffd6;
+  --lp-brand-ink: #24645f;
+  --lp-allow: #2f7f76;  --lp-allow-bg: #e8f8f3;  --lp-allow-line: #52b9a3;
+  --lp-review: #9a6512; --lp-review-bg: #fff2d6; --lp-review-line: #e6c98a;
+  --lp-block: #b4373d;  --lp-block-bg: #fde3e4;  --lp-block-line: #eaa9ad;
+  --lp-shadow-sm: 0 2px 10px rgba(20, 32, 43, .06);
+  --lp-shadow: 0 18px 44px rgba(20, 32, 43, .10);
+  --lp-shadow-lg: 0 30px 70px rgba(20, 32, 43, .13);
+  --lp-max: 1120px;
+  --lp-mono: var(--font-mono), "JetBrains Mono", monospace;
+  --lp-sans: var(--font-sans), "Instrument Sans", system-ui, sans-serif;
+
+  background: var(--lp-bg);
+  color: var(--lp-text);
+  font-family: var(--lp-sans);
+  overflow-x: clip;
+}
+
+.lp * { box-sizing: border-box; }
+.lp section { width: min(var(--lp-max), calc(100% - 48px)); margin-inline: auto; }
+.lp h1, .lp h2, .lp h3 { margin: 0; font-family: var(--lp-sans); color: var(--lp-text); letter-spacing: -.03em; }
+.lp p { margin: 0; color: var(--lp-muted); line-height: 1.62; }
+.lp a { color: inherit; text-decoration: none; }
+
+/* Shared bits ------------------------------------------------------------- */
+.lp .lpKicker {
+  display: inline-flex; align-items: center; gap: 8px;
+  color: var(--lp-brand-ink); font: 800 12px/1 var(--lp-mono);
+  letter-spacing: .12em; text-transform: uppercase;
+}
+.lp .lpKicker i {
+  width: 7px; height: 7px; border-radius: 50%; background: var(--lp-brand-strong);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--lp-brand) 30%, transparent);
+}
+.lp .lpLink {
+  display: inline-flex; align-items: center; gap: 7px; width: fit-content;
+  color: var(--lp-text); font-size: 15px; font-weight: 700;
+}
+.lp .lpLink svg { width: 17px; transition: transform .16s ease; }
+.lp .lpLink:hover svg { transform: translateX(3px); }
+
+/* Buttons */
+.lp .lpCta { display: flex; flex-wrap: wrap; gap: 14px; }
+.lp .lpBtn {
+  display: inline-flex; align-items: center; gap: 9px;
+  border: 0; border-radius: 12px; background: var(--lp-text); color: #fff;
+  padding: 15px 24px; font-size: 15px; font-weight: 720;
+  transition: transform .16s ease, background .16s ease;
+}
+.lp .lpBtn:hover { transform: translateY(-2px); background: #2c4357; }
+.lp .lpBtn svg { width: 17px; }
+.lp .lpBtn.dark { background: var(--lp-text); }
+.lp .lpBtnGhost {
+  display: inline-flex; align-items: center; gap: 9px;
+  border: 1.5px solid var(--lp-line-2); border-radius: 12px; background: transparent;
+  color: var(--lp-text); padding: 15px 22px; font-size: 15px; font-weight: 700;
+  transition: border-color .16s ease, background .16s ease;
+}
+.lp .lpBtnGhost:hover { border-color: var(--lp-text); background: var(--lp-surface-2); }
+.lp .lpBtnGhost svg { width: 16px; }
+.lp .lpBtnGhost.dark:hover { background: rgba(20, 32, 43, .06); }
+
+/* ============================================================================
+   HERO — problem-first, two columns with illustration
+   ========================================================================== */
+.lp .lpHero { position: relative; }
+.lp .lpHeroSplit {
+  display: grid; grid-template-columns: 1.05fr .95fr; gap: 56px; align-items: center;
+  padding: 84px 0 68px;
+}
+.lp .lpHero::before {
+  content: ""; position: absolute; inset: -120px 0 auto; height: 560px; z-index: 0;
+  background:
+    radial-gradient(680px 340px at 78% 40px, rgba(201, 255, 69, .30), transparent 66%),
+    radial-gradient(420px 300px at 6% 200px, rgba(201, 255, 69, .10), transparent 70%);
+  pointer-events: none;
+}
+.lp .lpHeroSplit > * { position: relative; z-index: 1; }
+.lp .lpHeroCopy h1 {
+  margin: 20px 0 18px; font-size: clamp(38px, 4.6vw, 60px);
+  font-weight: 720; line-height: 1.02; letter-spacing: -.04em;
+}
+.lp .lpHeroCopy > p { max-width: 520px; font-size: 18px; line-height: 1.58; margin-bottom: 30px; }
+.lp .lpHeroArt { display: grid; place-items: center; }
+.lp .lpArtSvg { width: 100%; max-width: 520px; height: auto; }
+.lp .lpArtIn > g { transition: transform .3s ease; }
+
+/* ============================================================================
+   PROBLEM / PROOF — cited industry numbers, not our own metrics
+   ========================================================================== */
+.lp .lpProblem { padding: 96px 0 88px; }
+.lp .lpStats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 18px; margin-top: 12px; }
+.lp .lpStat {
+  display: grid; align-content: start; gap: 12px; min-height: 200px;
+  border: 1px solid var(--lp-line); border-radius: 20px; background: var(--lp-surface);
+  padding: 28px 24px; box-shadow: var(--lp-shadow-sm);
+}
+.lp .lpStat strong {
+  font: 700 clamp(30px, 3vw, 40px)/1 var(--lp-mono); letter-spacing: -.03em; color: var(--lp-text);
+}
+.lp .lpStat span { color: var(--lp-muted); font-size: 14px; line-height: 1.5; }
+.lp .lpStat span b { color: var(--lp-text); font-weight: 800; }
+.lp .lpStatAlarm { border-color: var(--lp-block-line); background: linear-gradient(180deg, var(--lp-block-bg), var(--lp-surface)); }
+.lp .lpStatAlarm strong { color: var(--lp-block); }
+.lp .lpSources { margin-top: 22px; text-align: center; color: var(--lp-faint); font-size: 13px; }
+.lp .lpSources a { color: var(--lp-muted); font-weight: 600; text-decoration: underline; text-underline-offset: 3px; }
+.lp .lpSources a:hover { color: var(--lp-text); }
+
+/* ============================================================================
+   THE ANSWER — what GuardRails does, with the cluster illustration
+   ========================================================================== */
+.lp .lpAnswer {
+  display: grid; grid-template-columns: .9fr 1.1fr; gap: 60px; align-items: center;
+  padding: 96px 0;
+}
+.lp .lpAnswerArt {
+  position: relative; display: grid; place-items: center;
+  border: 1px solid var(--lp-line); border-radius: 24px;
+  background: linear-gradient(180deg, var(--lp-surface-2), var(--lp-surface));
+  padding: 40px; box-shadow: var(--lp-shadow-sm);
+}
+.lp .lpThreatSvg { width: 100%; max-width: 340px; height: auto; }
+.lp .lpAnswerBadge {
+  position: absolute; bottom: 22px; right: 22px;
+  display: inline-flex; align-items: center; gap: 8px;
+  border: 1px solid var(--lp-line-2); border-radius: 999px; background: var(--lp-surface);
+  padding: 9px 15px; font-size: 13px; font-weight: 750; color: var(--lp-text);
+  box-shadow: var(--lp-shadow);
+}
+.lp .lpAnswerBadge svg { width: 16px; color: var(--lp-brand-ink); }
+.lp .lpAnswerCopy h2 { margin: 16px 0 16px; font-size: clamp(30px, 3.4vw, 44px); font-weight: 720; line-height: 1.06; }
+.lp .lpAnswerCopy > p { font-size: 17px; margin-bottom: 26px; }
+.lp .lpAnswerList { display: grid; gap: 18px; margin: 0 0 30px; padding: 0; list-style: none; }
+.lp .lpAnswerList li { display: grid; grid-template-columns: 16px minmax(0, 1fr); gap: 14px; align-items: start; }
+.lp .lpDot { width: 12px; height: 12px; margin-top: 6px; border-radius: 50%; }
+.lp .lpDot.allow { background: var(--lp-brand-strong); box-shadow: 0 0 0 4px var(--lp-brand-soft); }
+.lp .lpAnswerList strong { font-size: 16px; font-weight: 720; }
+.lp .lpAnswerList small { display: block; margin-top: 3px; color: var(--lp-muted); font-size: 14px; line-height: 1.5; }
+
+/* ============================================================================
+   SECTION HEADERS (shared, centered)
+   ========================================================================== */
+.lp .lpSection { padding: 100px 0; }
+.lp .lpSectionHead { max-width: 720px; margin: 0 auto 48px; text-align: center; display: grid; justify-items: center; }
+.lp .lpSectionHead h2 { margin: 16px 0 14px; font-size: clamp(32px, 3.6vw, 46px); font-weight: 720; line-height: 1.05; }
+.lp .lpSectionHead p { font-size: 18px; }
+
+/* ============================================================================
+   HOW IT WORKS — 3 simple steps
+   ========================================================================== */
+.lp .lpSteps { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; }
+.lp .lpStep {
+  display: grid; align-content: start; justify-items: center; text-align: center; gap: 14px; min-height: 230px;
+  border: 1px solid var(--lp-line); border-radius: 20px; background: var(--lp-surface);
+  padding: 34px 28px; box-shadow: var(--lp-shadow-sm);
+  transition: transform .18s ease, box-shadow .18s ease, border-color .18s ease;
+}
+.lp .lpStep:hover { transform: translateY(-4px); border-color: var(--lp-brand-strong); box-shadow: var(--lp-shadow); }
+.lp .lpStepNum {
+  display: grid; place-items: center; width: 54px; height: 54px; border-radius: 16px;
+  background: var(--lp-brand-soft); color: var(--lp-brand-ink);
+}
+.lp .lpStepNum svg { width: 26px; }
+.lp .lpStep h3 { font-size: 21px; font-weight: 720; }
+.lp .lpStep p { font-size: 15px; }
+
+/* ============================================================================
+   FEATURE TRIO
+   ========================================================================== */
+.lp .lpFeatures { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; }
+.lp .lpFeature {
+  display: grid; align-content: start; gap: 15px; min-height: 240px;
+  border: 1px solid var(--lp-line); border-radius: 20px; padding: 30px;
+  background: linear-gradient(180deg, var(--lp-surface-2), var(--lp-surface));
+  transition: transform .18s ease, box-shadow .18s ease, border-color .18s ease;
+}
+.lp .lpFeature:hover { transform: translateY(-4px); border-color: var(--lp-brand-strong); box-shadow: var(--lp-shadow); }
+.lp .lpFeatureIcon { display: grid; place-items: center; width: 50px; height: 50px; border-radius: 14px; border: 1px solid var(--lp-line); background: var(--lp-surface); color: var(--lp-brand-ink); }
+.lp .lpFeatureIcon svg { width: 24px; }
+.lp .lpFeature h3 { font-size: 22px; font-weight: 720; }
+.lp .lpFeature p { font-size: 15px; }
+
+/* ============================================================================
+   MONITORING — simple split with a light alert list
+   ========================================================================== */
+.lp .lpMonitor { display: grid; grid-template-columns: .9fr 1.1fr; gap: 64px; align-items: center; }
+.lp .lpMonitorCopy h2 { margin: 16px 0 16px; font-size: clamp(30px, 3.4vw, 44px); font-weight: 720; line-height: 1.07; }
+.lp .lpMonitorCopy p { font-size: 17px; }
+.lp .lpMonitorCopy .lpLink { margin-top: 24px; }
+.lp .lpAlerts {
+  overflow: hidden; border: 1px solid var(--lp-line-2); border-radius: 18px;
+  background: var(--lp-surface); box-shadow: var(--lp-shadow);
+}
+.lp .lpAlerts > header { display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid var(--lp-line); padding: 18px 22px; }
+.lp .lpAlerts > header strong { font-size: 15px; font-weight: 720; }
+.lp .lpAlerts > header span { display: inline-flex; align-items: center; gap: 7px; color: var(--lp-muted); font-size: 12px; font-weight: 600; }
+.lp .lpAlerts > header span i { width: 8px; height: 8px; border-radius: 50%; background: var(--lp-review); }
+.lp .lpAlertRow { display: grid; grid-template-columns: 34px minmax(0, 1fr) auto; gap: 14px; align-items: center; border-bottom: 1px solid var(--lp-line); padding: 16px 22px; }
+.lp .lpAlertRow:last-child { border-bottom: 0; }
+.lp .lpAlertIcon { display: grid; place-items: center; width: 34px; height: 34px; border-radius: 10px; }
+.lp .lpAlertIcon svg { width: 16px; }
+.lp .lpAlertIcon.review { background: var(--lp-review-bg); color: var(--lp-review); }
+.lp .lpAlertIcon.allow { background: var(--lp-allow-bg); color: var(--lp-allow); }
+.lp .lpAlertIcon.block { background: var(--lp-block-bg); color: var(--lp-block); }
+.lp .lpAlertRow strong { font-size: 14px; font-weight: 700; }
+.lp .lpAlertRow small { display: block; margin-top: 2px; color: var(--lp-muted); font-size: 12.5px; }
+.lp .lpAlertRow code { color: var(--lp-faint); font: 12px var(--lp-mono); }
+
+/* ============================================================================
+   CLOSING CTA — lime band
+   ========================================================================== */
+.lp .lpClosing {
+  width: 100%; max-width: 100%; margin-top: 24px;
+  display: grid; justify-items: center; text-align: center;
+  background: var(--lp-brand); padding: 104px 24px 112px;
+}
+.lp .lpClosingBrand { display: inline-flex; align-items: center; gap: 9px; margin-bottom: 12px; }
+.lp .lpClosingBrand strong { font-family: var(--font-brand), cursive; font-size: 30px; font-weight: 400; }
+.lp .lpClosing h2 { max-width: 760px; margin: 8px 0 6px; font-size: clamp(34px, 4.4vw, 54px); font-weight: 720; line-height: 1.04; letter-spacing: -.04em; }
+.lp .lpClosing > p { max-width: 540px; color: var(--lp-ink-2); font-size: 17px; margin-bottom: 30px; }
+
+/* ============================================================================
+   RESPONSIVE
+   ========================================================================== */
+@media (max-width: 960px) {
+  .lp .lpHeroSplit { grid-template-columns: 1fr; gap: 40px; padding-top: 56px; }
+  .lp .lpHeroArt { order: -1; }
+  .lp .lpArtSvg { max-width: 420px; }
+  .lp .lpStats { grid-template-columns: 1fr 1fr; }
+  .lp .lpAnswer { grid-template-columns: 1fr; gap: 40px; }
+  .lp .lpAnswerArt { order: -1; }
+  .lp .lpSteps { grid-template-columns: 1fr; }
+  .lp .lpFeatures { grid-template-columns: 1fr; }
+  .lp .lpMonitor { grid-template-columns: 1fr; gap: 44px; }
+}
+
+@media (max-width: 640px) {
+  .lp section { width: calc(100% - 32px); }
+  .lp .lpSection { padding: 68px 0; }
+  .lp .lpProblem { padding: 68px 0; }
+  .lp .lpAnswer { padding: 68px 0; }
+  .lp .lpHeroCopy > p { font-size: 16px; }
+  .lp .lpStats { grid-template-columns: 1fr; }
+  .lp .lpStat { min-height: 0; }
+  .lp .lpCta { flex-direction: column; align-items: stretch; }
+  .lp .lpBtn, .lp .lpBtnGhost { justify-content: center; }
+}

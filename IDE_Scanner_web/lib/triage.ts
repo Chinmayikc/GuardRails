@@ -1,0 +1,47 @@
+import type { ExtensionSummary } from "@/lib/types";
+
+export type TriageBucket = {
+  id: string;
+  label: string;
+  description: string;
+  extensions: ExtensionSummary[];
+};
+
+export function buildTriageBuckets(extensions: ExtensionSummary[]): TriageBucket[] {
+  return [
+    {
+      id: "remove",
+      label: "Remove now",
+      description: "Confirmed malicious or very high malware confidence.",
+      extensions: extensions.filter((item) => item.verdict === "malicious" || item.malware_score >= 90)
+    },
+    {
+      id: "investigate",
+      label: "Investigate next",
+      description: "Suspicious or high-risk extensions that need source review or an independent controlled-analysis provider.",
+      extensions: extensions.filter((item) => item.verdict === "suspicious" || item.risk_score >= 80 || item.malware_score >= 60)
+    },
+    {
+      id: "review",
+      label: "Manual review",
+      description: "Powerful, agentic, dependency, or provenance signals without confirmed malware.",
+      extensions: extensions.filter((item) => item.verdict === "review" && item.risk_score < 80 && item.malware_score < 60)
+    },
+    {
+      id: "watch",
+      label: "Watch list",
+      description: "Clean or low-score extensions with context-only findings.",
+      extensions: extensions.filter((item) => {
+        if (item.verdict !== "clean") return false;
+        const hasActionabilityBreakdown = [item.actionable_finding_count, item.low_finding_count, item.contextual_finding_count].some((value) => typeof value === "number");
+        return item.risk_score > 0 || Number(item.actionable_finding_count || 0) > 0 || (!hasActionabilityBreakdown && item.finding_count > 0);
+      })
+    }
+  ];
+}
+
+export function topAction(buckets: TriageBucket[]): string {
+  const first = buckets.find((bucket) => bucket.extensions.length > 0);
+  if (!first) return "No action required from the latest scan.";
+  return `${first.extensions.length} extension(s) in ${first.label.toLowerCase()}.`;
+}

@@ -1,0 +1,53 @@
+{
+  "schema_version": "0.1.0",
+  "extensions": [
+    {
+      "path": "../fixtures/benign-formatter",
+      "extension_id": "trusted.trusted-formatter",
+      "expected_verdict": "clean",
+      "reason": "Command-scoped benign extension with no actionable abuse path."
+    },
+    {
+      "path": "../fixtures/agent-tool",
+      "extension_id": "example.agent-toolbox",
+      "expected_verdict": "clean",
+      "reason": "Agent-facing capability is reported as a capability contract; it is not static malware evidence by itself."
+    },
+    {
+      "path": "../fixtures/credential-exfil",
+      "extension_id": "unknown.shadow-helper",
+      "expected_verdict": "suspicious",
+      "reason": "Static credential read and outbound network chain."
+    },
+    {
+      "path": "../fixtures/startup-theme",
+      "extension_id": "trusted.startup-theme",
+      "expected_verdict": "clean",
+      "reason": "Startup activation alone is context, not actionable review."
+    },
+    {
+      "path": "../fixtures/lifecycle-dropper",
+      "extension_id": "unknown.dropper",
+      "expected_verdict": "suspicious",
+      "reason": "Install-time download and shell execution chain."
+    },
+    {
+      "path": "../fixtures/mutable-dependency",
+      "extension_id": "example.mutable-dependency",
+      "expected_verdict": "clean",
+      "reason": "Mutable and unpinned runtime dependencies are low-severity hardening notes until exact vulnerable or malicious resolution is established."
+    },
+    {
+      "path": "../fixtures/native-artifact",
+      "extension_id": "example.native-artifact",
+      "expected_verdict": "clean",
+      "reason": "Native artifact origin is a bounded low-severity governance note until independent provenance evidence or a policy violation exists."
+    },
+    {
+      "path": "../fixtures/threat-feed-malware",
+      "extension_id": "knownbad.feed-hit",
+      "expected_verdict": "malicious",
+      "reason": "Trusted local threat feed marks this extension id as malware."
+    }
+  ]
+}
