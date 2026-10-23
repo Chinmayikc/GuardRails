@@ -1,6 +1,6 @@
 AWSTemplateFormatVersion: "2010-09-09"
 Transform: AWS::Serverless-2016-10-31
-Description: Abscissa Access Risk demo API with encrypted evidence storage and optional Bedrock explanations.
+Description: GuardRails Access Risk demo API with encrypted evidence storage and optional Bedrock explanations.
 
 Parameters:
   ApiSharedSecret:
@@ -10,8 +10,11 @@ Parameters:
     Description: Random server-to-server secret. Set the same value as ACCESS_RISK_AWS_API_KEY in Vercel.
   BedrockModelId:
     Type: String
-    Default: amazon.nova-lite-v1:0
-    Description: Bedrock model ID available in the deployment region.
+    Default: ""
+    Description: Optional Bedrock model ID. Leave blank for rules-only reviews and no inference usage.
+
+Conditions:
+  BedrockEnabled: !Not [!Equals [!Ref BedrockModelId, ""]]
 
 Globals:
   Function:
@@ -85,11 +88,14 @@ Resources:
                   kms:EncryptionContext:aws:s3:arn:
                     - !Sub arn:${AWS::Partition}:s3:::${EvidenceBucket}
                     - !Sub arn:${AWS::Partition}:s3:::${EvidenceBucket}/*
-        - Version: "2012-10-17"
-          Statement:
-            - Effect: Allow
-              Action: bedrock:InvokeModel
-              Resource: !Sub arn:${AWS::Partition}:bedrock:${AWS::Region}::foundation-model/${BedrockModelId}
+        - !If
+          - BedrockEnabled
+          - Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: bedrock:InvokeModel
+                Resource: !Sub arn:${AWS::Partition}:bedrock:${AWS::Region}::foundation-model/${BedrockModelId}
+          - !Ref AWS::NoValue
       Events:
         Analyze:
           Type: Api
