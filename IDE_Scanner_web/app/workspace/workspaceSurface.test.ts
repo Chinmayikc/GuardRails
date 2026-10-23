@@ -153,7 +153,7 @@ describe("GuardRails workspace product surface", () => {
   });
 
   it("uses route-scoped styling and responsive product layouts", () => {
-    expect(page).toContain('import styles from "./workspace.module.css"');
+    expect(page).toContain('import styles from "./teamWorkspace.module.css"');
     expect(workspace).toContain("teamWorkspace.module.css");
     expect(css).toContain("@media(max-width:760px)");
     expect(css).toContain(".sidebarOpen");

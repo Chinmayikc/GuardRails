@@ -8,8 +8,9 @@ describe("public workspace demo boundary", () => {
   it("shows a read-only sample workspace unless a session is verified", () => {
     expect(page).toContain('if (state === "ready") return <TeamWorkspace />');
     expect(page).toContain("return <PublicWorkspaceDemo />");
-    expect(page).toContain("PUBLIC · READ ONLY");
-    expect(page).toContain("This page cannot read or change any real team workspace.");
+    expect(page).toContain("Public dashboard demo");
+    expect(page).toContain("canExitSample={false}");
+    expect(page).not.toContain("/account?next=/workspace");
     expect(page).toContain("@/app/workspace/sampleData");
   });
 

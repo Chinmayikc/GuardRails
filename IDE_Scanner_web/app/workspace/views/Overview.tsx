@@ -127,6 +127,7 @@ export default function Overview({
   sampleMode,
   onSample,
   onNavigate,
+  canExitSample = true,
 }: {
   team: Team;
   decisions: QueueDecision[];
@@ -140,6 +141,7 @@ export default function Overview({
   sampleMode: boolean;
   onSample: (value: boolean) => void;
   onNavigate: (view: View) => void;
+  canExitSample?: boolean;
 }) {
   return (
     <>
@@ -150,7 +152,7 @@ export default function Overview({
             <strong>Sample workspace</strong>This preview uses example data and
             cannot change your real workspace.
           </span>
-          <button onClick={() => onSample(false)}>Exit sample</button>
+          {canExitSample ? <button onClick={() => onSample(false)}>Exit sample</button> : null}
         </div>
       ) : null}
       <section className={styles.focusDeck}>
