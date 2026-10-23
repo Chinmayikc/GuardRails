@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
-import { ArrowRight, ShieldAlert } from "lucide-react";
+import { ArrowRight, Eye, ShieldCheck } from "lucide-react";
 import TeamWorkspace from "@/app/TeamWorkspace";
 import { browserDb } from "@/lib/supabase";
 import { browserAuthHeaders } from "@/lib/browserAuth";
@@ -30,8 +30,7 @@ export default function WorkspacePage() {
   }, [db]);
 
   if (state === "ready") return <TeamWorkspace />;
-  if (state === "error") return <main className={styles.statePage}><ShieldAlert/><strong>Workspace unavailable</strong><p>We could not verify your session. Your public security reports are still available.</p><div className={styles.stateActions}><Link href="/account?next=/workspace">Sign in again <ArrowRight/></Link><Link href="/registry">Open registry</Link></div></main>;
-  return <WorkspaceGate />;
+  return <PublicWorkspaceDemo />;
 }
 
 function displayName(watch: (typeof sampleWatches)[number]) {
@@ -40,23 +39,20 @@ function displayName(watch: (typeof sampleWatches)[number]) {
   return record?.display_name || watch.extension_id;
 }
 
-function WorkspaceGate() {
-  const clineWatch = sampleWatches[0];
-  const clineDecision = sampleDecisions[0];
-  const clineAlert = sampleAlerts[0];
-  const eslintWatch = sampleWatches[2];
+function PublicWorkspaceDemo() {
   return <main className={styles.gate}>
-    <section className={styles.gateCopy}><span><i/> GuardRails workspace</span><h1>Keep every release decision beside its evidence.</h1><p>Monitor exact versions, route meaningful changes to an owner, and preserve the rationale behind each decision.</p><div className={styles.stateActions}><Link href="/account?next=/workspace">Create your workspace <ArrowRight/></Link><Link href="/registry">Browse public reports</Link></div><small>No credit card required · Public reports stay open</small></section>
-    <section className={styles.gatePreview} aria-label="Example workspace preview">
-      <header><span>Example workspace</span><em>Sample data</em></header>
+    <section className={styles.gateCopy}><span><i/> GuardRails workspace · public demo</span><h1>Keep every release decision beside its evidence.</h1><p>Explore a read-only example of how a team reviews extension changes, tracks baselines, and routes important signals. No sign-in is needed to explore this demo.</p><div className={styles.stateActions}><Link href="/account?next=/workspace">Open your private workspace <ArrowRight/></Link><Link href="/registry">Browse public reports</Link></div><small>Fictional sample data · Your real team inventory stays private</small></section>
+    <section className={styles.gatePreview} aria-label="Read-only public workspace demo">
+      <header><span>Sample workspace</span><em><Eye size={13}/> PUBLIC · READ ONLY</em></header>
       <div className={styles.previewMetrics}>
         <article><strong>{sampleDecisions.length}</strong><span>Need review</span></article>
         <article><strong>{sampleWatches.length}</strong><span>Monitored</span></article>
-        <article><strong>1</strong><span>Open alert</span></article>
+        <article><strong>{sampleAlerts.filter((alert) => alert.state === "open").length}</strong><span>Open alert</span></article>
       </div>
-      <div className={styles.previewItem}><b>UP</b><div><strong>{displayName(clineWatch)} · {clineDecision.extension_id}</strong><small>{clineWatch.baseline_version} → {clineDecision.version}</small></div><span>{clineAlert.title.replace(/^Cline /, "")}</span><em>Review</em></div>
-      <div className={styles.previewItem}><b>BL</b><div><strong>{displayName(eslintWatch)} · {eslintWatch.extension_id}</strong><small>Baseline {eslintWatch.baseline_version} approved</small></div><span>No meaningful change</span><em className={styles.safe}>Ready</em></div>
-      <p className={styles.previewNote}>Illustrative sample rows — your workspace starts empty and fills with your own extensions.</p>
+      <section className={styles.demoSection} aria-label="Sample review queue"><h2>Review queue <span>{sampleDecisions.length}</span></h2>{sampleDecisions.map((decision) => { const watch = sampleWatches.find((item) => item.extension_id === decision.extension_id); return <article className={styles.demoRow} key={decision.id}><span className={styles.demoMark}><ShieldCheck size={15}/></span><div><strong>{watch ? displayName(watch) : decision.extension_id}</strong><small>{decision.extension_id} · version {decision.version}</small></div><em>Review</em></article>; })}</section>
+      <section className={styles.demoSection} aria-label="Sample monitored extensions"><h2>Monitored extensions <span>{sampleWatches.length}</span></h2>{sampleWatches.map((watch) => <article className={styles.demoRow} key={watch.extension_id}><span className={styles.demoMark}><Eye size={15}/></span><div><strong>{displayName(watch)}</strong><small>{watch.extension_id} · baseline {watch.baseline_version}</small></div><em className={styles.safe}>Watching</em></article>)}</section>
+      {sampleAlerts[0] ? <aside className={styles.demoAlert}><span>Open alert · HIGH</span><strong>{sampleAlerts[0].title}</strong><p>{sampleAlerts[0].summary}</p></aside> : null}
+      <p className={styles.previewNote}>All names and events here are illustrative sample data. This page cannot read or change any real team workspace.</p>
     </section>
   </main>;
 }

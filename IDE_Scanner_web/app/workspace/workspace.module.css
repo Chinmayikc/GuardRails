@@ -4,3 +4,13 @@
 @media(max-width:900px){.gate{grid-template-columns:1fr;padding:36px 22px}.gatePreview{transform:none}.gateCopy h1{font-size:48px}}
 @media(max-width:560px){.stateActions{align-items:stretch;flex-direction:column;width:100%}.gateCopy h1{font-size:40px}.gatePreview{padding:12px}.previewMetrics{grid-template-columns:1fr}.previewItem{grid-template-columns:38px 1fr auto}.previewItem>span{display:none}}
 .previewNote{margin:14px 4px 0;border-top:1px solid #edf0eb;padding-top:12px;color:#7a837d;font-size:12px}
+.gatePreview header em{display:flex;align-items:center;gap:5px;font-size:9px;letter-spacing:.06em}
+.demoSection{margin-top:15px;border-top:1px solid #edf0eb;padding-top:14px}
+.demoSection h2{display:flex;align-items:center;justify-content:space-between;margin:0 4px 7px;color:#515c55;font-size:11px;font-weight:750;text-transform:uppercase;letter-spacing:.06em}
+.demoSection h2 span{display:grid;place-items:center;min-width:22px;height:22px;border-radius:50%;background:#f0f3ee;color:#56615a;font:700 10px var(--mono)}
+.demoRow{display:grid;grid-template-columns:30px minmax(0,1fr) auto;align-items:center;gap:10px;padding:10px 4px;border-top:1px solid #f0f2ee}
+.demoMark{display:grid;place-items:center;width:28px;height:28px;border-radius:8px;background:#e8f8f3;color:#247968}
+.demoRow>div{display:grid;gap:3px;min-width:0}.demoRow strong{overflow:hidden;color:#252a26;font-size:11px;text-overflow:ellipsis;white-space:nowrap}.demoRow small{overflow:hidden;color:#7a837d;font:9px var(--mono);text-overflow:ellipsis;white-space:nowrap}
+.demoRow em{padding:5px 7px;border-radius:20px;background:#fff1dc;color:#965a00;font:700 9px var(--mono);font-style:normal;white-space:nowrap}.demoRow em.safe{background:#eaf5e2;color:#177d69}
+.demoAlert{display:grid;gap:6px;margin-top:14px;border:1px solid #f0ddc0;border-radius:12px;background:#fffaf1;padding:13px}.demoAlert>span{color:#9b661c;font:700 9px var(--mono);text-transform:uppercase;letter-spacing:.06em}.demoAlert strong{color:#443820;font-size:12px}.demoAlert p{margin:0;color:#786b53;font-size:11px;line-height:1.5}
+@media(max-width:560px){.demoRow{grid-template-columns:28px minmax(0,1fr) auto;gap:7px}.demoRow em{font-size:8px;padding:4px 6px}.demoAlert{padding:11px}}
