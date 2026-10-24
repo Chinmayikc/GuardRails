@@ -18,7 +18,7 @@ export async function POST(request: Request) {
     console.error("[newsletter]", message);
     if (/credential|not configured|supabase/i.test(message)) {
       return NextResponse.json(
-        { error: "Signup is temporarily unavailable. Email hello@abscissa.dev and we will add you manually." },
+        { error: "Signup is temporarily unavailable. Please try again later." },
         { status: 503 },
       );
     }

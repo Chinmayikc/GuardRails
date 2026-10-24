@@ -15,13 +15,13 @@ export type FeedbackEmailInput = {
 };
 
 export function feedbackRecipient(): string {
-  return runtimeEnv("FEEDBACK_TO_EMAIL").trim() || "hello@abscissa.dev";
+  return runtimeEnv("FEEDBACK_TO_EMAIL").trim();
 }
 
 export function feedbackEmailConfigured(): boolean {
   return Boolean(
     runtimeEnv("RESEND_API_KEY") &&
-      runtimeEnv("NOTIFICATION_FROM_EMAIL") &&
+      (runtimeEnv("RESEND_FROM_EMAIL").trim() || runtimeEnv("NOTIFICATION_FROM_EMAIL").trim()) &&
       isFeedbackEmail(feedbackRecipient()),
   );
 }
@@ -31,7 +31,7 @@ export function feedbackEmailPayload(input: FeedbackEmailInput) {
   const contact = input.contactEmail || "Not provided";
   const page = input.pagePath || "/";
   return {
-    from: runtimeEnv("NOTIFICATION_FROM_EMAIL"),
+    from: runtimeEnv("RESEND_FROM_EMAIL").trim() || runtimeEnv("NOTIFICATION_FROM_EMAIL").trim(),
     to: [feedbackRecipient()],
     subject: `[GuardRails feedback] ${label}`,
     text: [

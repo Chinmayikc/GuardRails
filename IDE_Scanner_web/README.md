@@ -42,9 +42,11 @@ GITHUB_REPO_OWNER=preethamak
 GITHUB_SCANNER_REPO=IDE_Scanner
 SCAN_CALLBACK_SECRET=... # random 32+ byte value
 SCAN_RATE_LIMIT_SECRET=... # separate random value
-RESEND_API_KEY=... # server-only; required for feedback and email notifications
-NOTIFICATION_FROM_EMAIL=feedback@abscissa.dev # verified Resend sender
-FEEDBACK_TO_EMAIL=hello@abscissa.dev # company inbox; defaults to hello@abscissa.dev
+RESEND_API_KEY=... # server-only; optional transactional email provider
+RESEND_FROM_EMAIL=... # optional verified sender; no default sender is used
+NOTIFICATION_FROM_EMAIL=... # optional verified notification sender
+FEEDBACK_TO_EMAIL=... # optional feedback recipient; unset disables email forwarding
+AUTH_EMAIL_FROM=... # optional verified auth/invitation sender; unset disables those emails
 OAUTH_GITHUB_CLIENT_SECRET=... # server-only; GitHub OAuth app secret
 GOOGLE_OAUTH_CLIENT_SECRET=... # server-only; Google OAuth web client secret
 ```
@@ -62,24 +64,15 @@ RESEND_API_KEY
 
 The secret key and workflow token are server-only. Never expose them through `NEXT_PUBLIC_*` variables. Deep Scan callbacks are HMAC-verified before schema validation and ingestion.
 
-The site-wide Feedback button stores private submissions in `feedback_submissions` and sends a plain-text notification through Resend. Apply the latest Supabase migration before enabling it in production. `FEEDBACK_TO_EMAIL` is optional when the company inbox is `hello@abscissa.dev`; set it explicitly for another inbox. If Resend is temporarily unavailable, the submission remains stored and is marked for operator follow-up.
+The site-wide Feedback button stores private submissions in `feedback_submissions`. Email forwarding is disabled unless an operator explicitly configures a verified sender, recipient, and provider key. Submissions remain stored if email forwarding is unavailable.
 
-### Sarvam evidence intelligence
+### Evidence intelligence
 
-The immutable report includes an optional signed-in **Evidence Intelligence** report. It compiles the complete available structured evidence for the exact artifact into an evidence graph, computes the access surface and potential blast-radius dimensions deterministically, and asks Sarvam only for a cited, calibrated interpretation. It does not send source previews, README content, canonical reports, credentials, or raw advisory payloads. The model output is schema-validated, every material claim is checked against exact-report evidence references, and the model cannot write or change a GuardRails decision.
+The immutable report includes an optional **Evidence Intelligence** guide. It compiles the available structured evidence for the exact artifact into an evidence graph and computes access-surface and potential blast-radius dimensions deterministically. No external AI provider is called and no report data leaves the application for model interpretation.
 
 The report presents the release identity, what the extension can access, evidence-backed data-flow visuals, a confidentiality/integrity/availability/network/persistence/supply-chain matrix, release changes when comparable evidence exists, explicit unknowns, and verification steps. Visuals are rendered by the application from validated data; the model never supplies HTML or SVG.
 
-Configure the integration with a server-only secret after rotating any key that has been exposed:
-
-```bash
-SARVAM_API_KEY=... # server-only; never use NEXT_PUBLIC_*
-SARVAM_REASONING_MODEL=sarvam-105b # optional allowlisted override
-```
-
-The default is `sarvam-105b` for the standard-key interactive report path. `deepseekv4-flash`, `glm5.2`, `glm5.3`, `glm5.3-flash`, and `gemma4` are allowlisted for operator experiments through Sarvam's `/v2` endpoint; beta models may require access for the specific key. Reasoning traces returned by beta models are intentionally discarded; only the validated report is shown. The endpoint requires authentication, limits each user to three requests per ten minutes in the shared D1 usage table, sends a bounded structured provider request with a 55-second deadline, and returns `private, no-store` responses.
-
-The intelligence endpoint is `POST /api/extensions/:id/versions/:version/scans/:scanId/intelligence` and accepts only a bounded review goal (`install_decision`, `flag_investigation`, or `publisher_response`) and `standard` depth. It returns a concise, evidence-cited reviewer guide rather than a free-form report; the deterministic scan remains authoritative. It uses the shared D1 `app_ai_usage` window for production limiting (three requests per user per ten minutes), with the operator kill switch `SARVAM_INTELLIGENCE_REPORT_ENABLED=false`. Deep review is intentionally not exposed until a separate shared credit/quota policy is enabled.
+The endpoint is `POST /api/extensions/:id/versions/:version/scans/:scanId/intelligence`; it accepts a bounded review goal and returns a concise, deterministic, evidence-cited reviewer guide. The exact scan remains authoritative. Requests are same-origin, limited to three per client per ten minutes, and responses use `private, no-store`.
 
 Google sign-in uses the Cloudflare Worker routes shown below rather than the legacy Supabase browser OAuth flow. Register both exact URLs in the Google OAuth client while testing:
 
@@ -88,7 +81,7 @@ https://abscissa.dev/api/auth/callback/google
 http://localhost:8765/api/auth/callback/google
 ```
 
-The production redirect is pinned in `wrangler.jsonc` as `GOOGLE_OAUTH_REDIRECT_URI`; keep the value identical to the URL registered in Google Cloud. `GOOGLE_OAUTH_CLIENT_ID` is a Worker variable and `GOOGLE_OAUTH_CLIENT_SECRET` is a server-only secret. Email sign-in sends a one-click link through the `AUTH_EMAIL` Cloudflare Email Sending binding, or through Resend when that binding is unavailable. The link expires after ten minutes. Set `RESEND_API_KEY` and keep `AUTH_EMAIL_FROM` on a verified sender before enabling the production flow.
+The production redirect is pinned in `wrangler.jsonc` as `GOOGLE_OAUTH_REDIRECT_URI`; keep the value identical to the URL registered in Google Cloud. `GOOGLE_OAUTH_CLIENT_ID` is a Worker variable and `GOOGLE_OAUTH_CLIENT_SECRET` is a server-only secret. Auth and invitation emails require a configured provider and verified sender; there is no hard-coded sender fallback.
 
 ### Cloudflare deployment
 

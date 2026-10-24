@@ -14,9 +14,10 @@ describe("reviewer guide surface", () => {
     expect(report).not.toContain("Positive signals");
   });
 
-  it("renders provider output through the structured guide and deterministic fallback", () => {
+  it("renders an evidence-validated deterministic guide", () => {
     expect(report).toContain("deterministic_fallback");
-    expect(report).toContain("Deterministic review summary — AI interpretation unavailable");
+    expect(report).toContain("Deterministic review guide · evidence validated");
+    expect(report).toContain("No report data is sent to an external AI provider.");
     expect(report).toContain("EvidenceRefs");
     expect(report).toContain("certainty");
     expect(visuals).toContain("ReviewerEventChainVisual");

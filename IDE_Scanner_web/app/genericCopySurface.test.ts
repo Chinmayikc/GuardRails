@@ -5,7 +5,6 @@ const read = (path: string) =>
   readFileSync(new URL(path, import.meta.url), "utf8");
 
 const auditedSurfaces = [
-  "./SarvamProgramNote.tsx",
   "./about/page.tsx",
   "./PublicSecuritySummary.tsx",
   "./EvidenceIntelligenceReport.tsx",
@@ -38,7 +37,6 @@ describe("site copy audit", () => {
     const source = auditedSurfaces.map(read).join("\n");
     for (const phrase of [
       "Make security findings easier to understand.",
-      "exploring Sarvam APIs for clear, localized summaries",
       "Built for the role",
       "Less noise. More decision context.",
       "Every extension decision in one trusted place.",
@@ -55,28 +53,11 @@ describe("site copy audit", () => {
       "Explore the publisher’s catalog.",
       "What changed, in one place.",
       "<small>Get started</small>",
-      "Explore Sarvam Indus",
       "Security brief",
       "Generate again",
       "Explore explicit,",
     ]) {
       expect(source).not.toContain(phrase);
-    }
-  });
-
-  it("anchors the Sarvam surface to the reviewer-guide contract", () => {
-    const sarvam = read("./SarvamProgramNote.tsx");
-    const about = read("./about/page.tsx");
-    expect(sarvam).toContain("what should I do next?");
-    expect(sarvam).toContain("The scan is the source of truth");
-    expect(about).toContain("three common questions");
-    expect(about).toContain("The scan remains the source of truth");
-    for (const source of [sarvam, about]) {
-      expect(source).not.toContain("bounded interpretation layer");
-      expect(source).not.toContain("exact artifacts");
-      expect(source).not.toContain("version-specific analysis");
-      expect(source).not.toContain("deterministic decision remains authoritative");
-      expect(source).not.toContain("exact report evidence");
     }
   });
 

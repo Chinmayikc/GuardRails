@@ -1,7 +1,6 @@
 "use client";
 
 import { useState } from "react";
-import Link from "next/link";
 import {
   ArrowRight,
   BadgeCheck,
@@ -11,7 +10,6 @@ import {
   LoaderCircle,
   LockKeyhole,
   Printer,
-  ShieldAlert,
 } from "lucide-react";
 import type { EvidenceIntelligenceReport, IntelligenceReviewGoal } from "@/lib/evidenceIntelligence";
 import { BlastRadiusVisual, EvidenceRefs, ReviewerEventChainVisual } from "./EvidenceIntelligenceVisuals";
@@ -29,12 +27,10 @@ export default function EvidenceIntelligenceReport({
   extensionId,
   version,
   scanId,
-  signedIn,
 }: {
   extensionId: string;
   version: string;
   scanId: string;
-  signedIn: boolean;
 }) {
   const [reviewGoal, setReviewGoal] = useState<IntelligenceReviewGoal>("install_decision");
   const [report, setReport] = useState<EvidenceIntelligenceReport | null>(null);
@@ -82,14 +78,7 @@ export default function EvidenceIntelligenceReport({
           <p>Reads the structured report for this artifact and returns a short, cited guide: the one thing to know, what could happen if the behavior runs, and what to verify next.</p>
         </div>
       </div>
-      {!signedIn ? (
-        <div className={styles.signIn}>
-          <ShieldAlert aria-hidden="true" />
-          <p><strong>Sign in to generate the reviewer guide.</strong> Generation is authenticated and quota-controlled because a bounded copy of the structured report is sent to Sarvam.</p>
-          <Link href="/account">Sign in <ArrowRight aria-hidden="true" /></Link>
-        </div>
-      ) : (
-        <div className={styles.controls}>
+      <div className={styles.controls}>
           <label>
             <span>What are you trying to decide?</span>
             <select value={reviewGoal} onChange={(event) => setReviewGoal(event.target.value as IntelligenceReviewGoal)} disabled={state === "loading"}>
@@ -101,9 +90,8 @@ export default function EvidenceIntelligenceReport({
             {state === "loading" ? <LoaderCircle className={styles.spin} aria-hidden="true" /> : <BrainCircuit aria-hidden="true" />}
             {state === "loading" ? "Reading exact evidence…" : report ? "Regenerate from exact report" : "Generate reviewer guide"}
           </button>
-          <details className={styles.dataDisclosure}><summary>What leaves Abscissa?</summary><p>Only bounded, redacted report facts: identity, decision metadata, capabilities, finding summaries, file references, dependency names and advisory counts, coverage, and normalized impact inputs. Raw source, README text, credentials, advisory payloads, and hidden reasoning are excluded.</p></details>
-        </div>
-      )}
+          <details className={styles.dataDisclosure}><summary>How this guide is produced</summary><p>The guide is generated from deterministic rules using the published report&apos;s structured evidence. No report data is sent to an external AI provider.</p></details>
+      </div>
       {state === "error" ? <p className={styles.error} role="alert">{message}</p> : null}
       {report ? <ReportResult report={report} /> : null}
     </section>
@@ -126,7 +114,7 @@ function ReportResult({ report }: { report: EvidenceIntelligenceReport }) {
   return (
     <div className={styles.result}>
       <div className={styles.hero}>
-        <span className={`${styles.validated} ${isFallback ? styles.fallback : ""}`}><BadgeCheck aria-hidden="true" /> {isFallback ? "Deterministic review summary — AI interpretation unavailable" : "Sarvam reviewer guide · evidence validated"}</span>
+        <span className={`${styles.validated} ${isFallback ? styles.fallback : ""}`}><BadgeCheck aria-hidden="true" /> Deterministic review guide · evidence validated</span>
         <span className={styles.goalLabel}>{goalLabel(report.review_goal)}</span>
         <h3>What you need to know</h3>
         <div className={styles.primaryCard}>

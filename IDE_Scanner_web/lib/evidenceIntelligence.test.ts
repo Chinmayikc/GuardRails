@@ -255,16 +255,16 @@ describe("blast-radius rules", () => {
 
 describe("signed context ticket", () => {
   it("accepts only an untampered context signed by the server secret", () => {
-    const previous = process.env.SARVAM_API_KEY;
-    process.env.SARVAM_API_KEY = "test-signing-secret";
+    const previous = process.env.EVIDENCE_CONTEXT_SIGNING_SECRET;
+    process.env.EVIDENCE_CONTEXT_SIGNING_SECRET = "test-signing-secret";
     try {
       const context = compileEvidenceIntelligenceContext(product());
       const ticket = signEvidenceIntelligenceContext(context);
       expect(verifyEvidenceIntelligenceTicket(ticket)).toMatchObject({ context_digest: context.context_digest, identity: context.identity, evidence_refs: context.evidence_refs });
       expect(verifyEvidenceIntelligenceTicket({ ...ticket, serialized: `${ticket.serialized} ` })).toBeNull();
     } finally {
-      if (previous === undefined) delete process.env.SARVAM_API_KEY;
-      else process.env.SARVAM_API_KEY = previous;
+      if (previous === undefined) delete process.env.EVIDENCE_CONTEXT_SIGNING_SECRET;
+      else process.env.EVIDENCE_CONTEXT_SIGNING_SECRET = previous;
     }
   });
 });

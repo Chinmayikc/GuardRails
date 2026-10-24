@@ -1,8 +1,5 @@
 import { NextResponse } from "next/server";
 import { getVersionScanProduct } from "@/lib/productData";
-import { serverDb } from "@/lib/supabaseServer";
-import { cloudflarePrivateAvailable } from "@/lib/cloudflareDeepScan";
-import { privateDb, userFromSession } from "@/lib/cloudflarePrivate";
 import {
   compileEvidenceIntelligenceContext,
   buildDeterministicReviewFallback,
@@ -12,12 +9,6 @@ import {
   type IntelligenceReviewGoal,
   type IntelligenceDepth,
 } from "@/lib/evidenceIntelligence";
-import {
-  createEvidenceIntelligenceReport,
-  SarvamConfigurationError,
-  SarvamOutputError,
-  SarvamProviderError,
-} from "@/lib/sarvam";
 
 export const dynamic = "force-dynamic";
 
@@ -50,29 +41,12 @@ export async function POST(
   const length = Number(request.headers.get("content-length") || "0");
   if (Number.isFinite(length) && length > MAX_BODY_BYTES) return errorResponse("Request body too large.", 413);
 
-  const cloudflare = cloudflarePrivateAvailable();
-  let db: Awaited<ReturnType<typeof serverDb>> | undefined;
-  let userId = "";
-  if (cloudflare) {
-    const user = await userFromSession(request);
-    if (!user) return errorResponse("Sign in to generate an intelligence report.", 401, "auth_required");
-    userId = user.id;
-  } else {
-    db = await serverDb();
-    const { data: { user } } = await db.auth.getUser();
-    if (!user) return errorResponse("Sign in to generate an intelligence report.", 401, "auth_required");
-    userId = user.id;
-  }
-  mark("authenticated");
-
   const options = await readOptions(request);
   if (!options) return errorResponse("Unsupported intelligence review options.", 400);
-  if (process.env.SARVAM_INTELLIGENCE_REPORT_ENABLED?.trim().toLowerCase() === "false") {
-    return errorResponse("Evidence intelligence is temporarily disabled.", 503, "ai_disabled");
-  }
   mark("options-read");
 
-  const limit = await checkRateLimit(userId, cloudflare);
+  const clientKey = request.headers.get("x-real-ip") || request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "unknown-client";
+  const limit = checkRateLimit(clientKey);
   if (!limit.allowed) {
     return new NextResponse(JSON.stringify({ error: "Intelligence generation is temporarily rate limited.", code: "rate_limited" }), {
       status: 429,
@@ -89,7 +63,7 @@ export async function POST(
         return errorResponse("A completed exact-artifact report is required.", 409);
       }
     } else {
-      const product = await getVersionScanProduct(extensionId, version, scanId, db, { compact: true, includePreviews: false, skipCloudflareCatalog: true });
+      const product = await getVersionScanProduct(extensionId, version, scanId, undefined, { compact: true, includePreviews: false, skipCloudflareCatalog: true });
       const scan = product?.scan as Record<string, unknown> | null | undefined;
       if (!product || !scan || String(scan.id || "") !== scanId || String(scan.extension_id || "").toLowerCase() !== extensionId.toLowerCase() || String(scan.version || "") !== version) {
         return errorResponse("This exact report is not available.", 404);
@@ -101,9 +75,9 @@ export async function POST(
     }
     if (!evidence) return errorResponse("This exact report is not available.", 404);
     mark(evidence ? "evidence-ready" : "evidence-missing");
-    const result = await createEvidenceIntelligenceReport(evidence, options.review_goal, options.depth);
-    mark("provider-complete");
-    return NextResponse.json(result.report, {
+    const report = buildDeterministicReviewFallback(evidence, options.review_goal);
+    mark("report-ready");
+    return NextResponse.json(report, {
       headers: {
         "Cache-Control": "private, no-store",
         "X-Content-Type-Options": "nosniff",
@@ -111,21 +85,9 @@ export async function POST(
       },
     });
   } catch (error) {
-    if (error instanceof SarvamProviderError && error.status === 429) return errorResponse("Sarvam is rate limiting this request. Try again shortly.", 429, "provider_rate_limited");
-    if (evidence && (error instanceof SarvamConfigurationError || error instanceof SarvamOutputError || error instanceof SarvamProviderError)) {
-      mark("deterministic-fallback");
-      const fallback = buildDeterministicReviewFallback(evidence, options.review_goal);
-      return NextResponse.json(fallback, {
-        headers: {
-          "Cache-Control": "private, no-store",
-          "X-Content-Type-Options": "nosniff",
-          "Content-Security-Policy": "default-src 'none'; frame-ancestors 'none'",
-        },
-      });
-    }
-    mark("provider-error");
-    console.warn("[evidence-intelligence] generation failed", { error: error instanceof Error ? error.name : "unknown" });
-    return errorResponse("Evidence intelligence generation is temporarily unavailable.", 502, "provider_unavailable");
+    mark("report-error");
+    console.warn("[evidence-intelligence] report generation failed", { error: error instanceof Error ? error.name : "unknown" });
+    return errorResponse("Evidence intelligence is temporarily unavailable.", 502, "report_unavailable");
   }
 }
 
@@ -147,30 +109,11 @@ async function readOptions(request: Request): Promise<{ review_goal: Intelligenc
   }
 }
 
-async function checkRateLimit(userId: string, cloudflare: boolean): Promise<{ allowed: boolean; retryAfter: number }> {
+function checkRateLimit(clientKey: string): { allowed: boolean; retryAfter: number } {
   const now = Date.now();
-  if (cloudflare) {
-    const db = privateDb();
-    const nowIso = new Date(now).toISOString();
-    const windowStartIso = new Date(now - WINDOW_MS).toISOString();
-    await db.prepare(`
-      INSERT INTO app_ai_usage(user_id,feature,window_started_at,request_count,updated_at)
-      VALUES(?,?,?,?,?)
-      ON CONFLICT(user_id,feature) DO UPDATE SET
-        request_count=CASE WHEN app_ai_usage.window_started_at<? THEN 1 ELSE app_ai_usage.request_count+1 END,
-        window_started_at=CASE WHEN app_ai_usage.window_started_at<? THEN excluded.window_started_at ELSE app_ai_usage.window_started_at END,
-        updated_at=excluded.updated_at
-    `).bind(userId, "evidence_intelligence", nowIso, 1, nowIso, windowStartIso, windowStartIso).run();
-    const row = await db.prepare("SELECT request_count,window_started_at FROM app_ai_usage WHERE user_id=? AND feature=? LIMIT 1").bind(userId, "evidence_intelligence").first<Record<string, unknown>>();
-    const count = Number(row?.request_count || 0);
-    const windowStartedAt = Date.parse(String(row?.window_started_at || nowIso));
-    if (count > MAX_REQUESTS_PER_WINDOW) return { allowed: false, retryAfter: Math.max(1, Math.ceil((windowStartedAt + WINDOW_MS - now) / 1_000)) };
-    return { allowed: true, retryAfter: 0 };
-  }
-  const key = `local:${userId}`;
-  const previous = localRequestBuckets.get(key);
+  const previous = localRequestBuckets.get(clientKey);
   if (!previous || previous.resetAt <= now) {
-    localRequestBuckets.set(key, { count: 1, resetAt: now + WINDOW_MS });
+    localRequestBuckets.set(clientKey, { count: 1, resetAt: now + WINDOW_MS });
     return { allowed: true, retryAfter: 0 };
   }
   if (previous.count >= MAX_REQUESTS_PER_WINDOW) return { allowed: false, retryAfter: Math.ceil((previous.resetAt - now) / 1_000) };

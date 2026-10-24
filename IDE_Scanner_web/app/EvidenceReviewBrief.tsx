@@ -38,8 +38,8 @@ export default function EvidenceReviewBrief({
       <div className={styles.signIn}>
         <p>
           <strong>Use the reviewer-guide surface.</strong> It keeps the
-          deterministic decision authoritative and only shows provider text
-          after the evidence references have been checked.
+          deterministic decision authoritative and traces every recommendation
+          back to evidence in the exact published report.
         </p>
         <Link href={href}>
           Open reviewer guide <ArrowRight aria-hidden="true" />

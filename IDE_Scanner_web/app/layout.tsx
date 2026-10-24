@@ -52,7 +52,7 @@ export default function RootLayout({
   const organizationJsonLd = {
     "@context": "https://schema.org",
     "@graph": [
-      { "@type": "Organization", name: "Abscissa", url: "https://abscissa.dev", description: "Builder of GuardRails, an independent VS Code extension security product for developers and security teams.", email: "hello@abscissa.dev" },
+      { "@type": "Organization", name: "Abscissa", url: "https://abscissa.dev", description: "Builder of GuardRails, an independent VS Code extension security product for developers and security teams." },
       { "@type": "SoftwareApplication", name: "GuardRails", alternateName: "Abscissa GuardRails", applicationCategory: "SecurityApplication", operatingSystem: "Web, macOS, Windows, Linux", url: "https://abscissa.dev", description: "Evidence-backed VS Code extension-package intelligence: exact-release reports, local inspection, release monitoring, team review, and a read-only MCP integration for AI assistants.", featureList: ["Published VS Code extension-package analysis", "Exact release and artifact evidence", "Local CLI inspection", "Release-change monitoring", "Team evidence and decision history", "Read-only MCP intelligence for AI assistants"] },
     ],
   };
@@ -127,7 +127,6 @@ export default function RootLayout({
                 <div>
                   <strong>Company</strong>
                   <Link href="/about">About GuardRails</Link>
-                  <Link href="/about#sarvam-ai">Sarvam AI program</Link>
                   <Link href="/contact">Contact</Link>
                   <Link href="/changelog">Changelog</Link>
                   <Link href="/faq">FAQ</Link>

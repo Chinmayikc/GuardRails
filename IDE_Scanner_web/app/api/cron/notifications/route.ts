@@ -341,7 +341,7 @@ async function finishTeam(
 }
 function slackMessage(alert: Row) {
   const site =
-    process.env.NEXT_PUBLIC_SITE_URL || "https://abscissa.dev";
+    process.env.NEXT_PUBLIC_SITE_URL || "https://guardrails-hackathon.vercel.app";
   const extension = String(alert.extension_id);
   const version = String(alert.version);
   const severity = String(alert.severity || "INFORMATIONAL");

@@ -3,8 +3,7 @@ import AnalysisReport from "@/app/ExtensionDossier";
 import { getExtensionProduct, getVersionScanProduct } from "@/lib/productData";
 import { parseExtensionDossierData } from "@/lib/reportContract";
 import { cloudflarePrivateAvailable } from "@/lib/cloudflareDeepScan";
-import { cloudflareGuestTrialToken, cloudflareSessionActive, cloudflareSessionUser } from "@/lib/cloudflareSession";
-import { serverDb } from "@/lib/supabaseServer";
+import { cloudflareGuestTrialToken, cloudflareSessionUser } from "@/lib/cloudflareSession";
 import { runtimeSupabase } from "@/lib/supabaseRuntime";
 
 export const dynamic = "force-dynamic";
@@ -25,8 +24,7 @@ export default async function ImmutableScanPage({
   // predate the D1 publication mirror; the report still has to pass the
   // exact version/scan identity checks in getVersionScanProduct.
   const legacyClient = cloudflare ? runtimeSupabase() : null;
-  const [claims, extensionProduct, versionProduct] = await Promise.all([
-    cloudflare ? (cloudflareUser ? true : cloudflareSessionActive()) : serverDb().then((db) => db.auth.getClaims().then((result) => Boolean(result.data?.claims))).catch(() => false),
+  const [extensionProduct, versionProduct] = await Promise.all([
     getExtensionProduct(id, legacyClient || undefined),
     getVersionScanProduct(id, version, scanId, legacyClient || undefined, {
       skipCloudflareCatalog: true,
@@ -65,5 +63,5 @@ export default async function ImmutableScanPage({
       </main>
     );
   }
-  return <AnalysisReport data={data} signedIn={claims} />;
+  return <AnalysisReport data={data} />;
 }

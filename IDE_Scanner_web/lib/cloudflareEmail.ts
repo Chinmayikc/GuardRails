@@ -26,7 +26,7 @@ export function cloudflareEmail(): EmailBinding | null {
 }
 
 export function authEmailFrom(): string {
-  return runtimeEnv("AUTH_EMAIL_FROM").trim() || "hello@abscissa.dev";
+  return runtimeEnv("AUTH_EMAIL_FROM").trim();
 }
 
 function resendEmailFrom(): string {
@@ -34,9 +34,11 @@ function resendEmailFrom(): string {
 }
 
 export async function sendAuthLink(email: string, link: string): Promise<void> {
+  const from = authEmailFrom();
+  if (!from) throw new Error("Authentication email delivery is disabled until a verified sender is configured.");
   const message: EmailMessage = {
     to: email,
-    from: authEmailFrom(),
+    from,
     subject: "Sign in to GuardRails",
     text: `Use this secure link to sign in to GuardRails:\n\n${link}\n\nThis link expires in 10 minutes. If you did not request it, you can ignore this email.`,
     html: `<p>Use this secure link to sign in to GuardRails:</p><p><a href="${link}">Sign in to GuardRails</a></p><p>This link expires in 10 minutes. If you did not request it, you can ignore this email.</p>`,
@@ -67,9 +69,11 @@ export async function sendAuthLink(email: string, link: string): Promise<void> {
 }
 
 export async function sendWorkspaceInvitation(email: string, link: string, role: string): Promise<void> {
+  const from = authEmailFrom();
+  if (!from) throw new Error("Invitation email delivery is disabled until a verified sender is configured.");
   const message: EmailMessage = {
     to: email,
-    from: authEmailFrom(),
+    from,
     subject: "You are invited to a GuardRails workspace",
     text: `You have been invited as a ${role} to a GuardRails workspace.\n\nAccept invitation: ${link}\n\nThis invitation expires in seven days.`,
     html: `<p>You have been invited as a <strong>${role}</strong> to a GuardRails workspace.</p><p><a href="${link}">Accept invitation</a></p><p>This invitation expires in seven days.</p>`,

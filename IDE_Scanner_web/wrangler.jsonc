@@ -20,10 +20,7 @@
     "GOOGLE_OAUTH_CLIENT_ID": "539877495650-9nrcag73os1umpgdi03lc2j4f9qien4s.apps.googleusercontent.com",
     "GOOGLE_OAUTH_REDIRECT_URI": "https://abscissa.dev/api/auth/callback/google",
     "NEXT_PUBLIC_SUPABASE_URL": "https://kmdujtabqaxgoeltbxpq.supabase.co",
-    "NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY": "sb_publishable_SFVIp0jbZBldUWVKHdwXBQ_ZQEvM_gS",
-    "AUTH_EMAIL_FROM": "hello@abscissa.dev",
-    "RESEND_FROM_EMAIL": "onboarding@resend.dev",
-    "NOTIFICATION_FROM_EMAIL": "hello@abscissa.dev"
+    "NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY": "sb_publishable_SFVIp0jbZBldUWVKHdwXBQ_ZQEvM_gS"
   },
   "routes": [
     {
@@ -47,13 +44,6 @@
       "database_name": "abscissa-scan-data",
       "database_id": "42467eb8-8beb-4fd8-8e5e-332458cac5f3",
       "migrations_dir": "d1/migrations"
-    }
-  ],
-  "send_email": [
-    {
-      "name": "AUTH_EMAIL",
-      "remote": true,
-      "allowed_sender_addresses": ["hello@abscissa.dev"]
     }
   ],
   "observability": {

@@ -1,7 +1,6 @@
 import Link from "next/link";
-import SarvamProgramNote from "@/app/SarvamProgramNote";
 import type { Metadata } from "next";
-import { ArrowRight, ExternalLink, Fingerprint, ScanSearch, ShieldCheck, Sparkles } from "lucide-react";
+import { ArrowRight, ExternalLink, Fingerprint, ScanSearch, ShieldCheck } from "lucide-react";
 
 export const metadata: Metadata = {
   title: "About GuardRails by Abscissa | VS Code extension security",
@@ -88,26 +87,7 @@ export default function AboutPage() {
             >
               LinkedIn
             </a>
-            , or write to <a href="mailto:hello@abscissa.dev">hello@abscissa.dev</a>.
-          </p>
-        </article>
-      </section>
-      <section className="trustInfoGrid sarvamAbout">
-        <article>
-          <Sparkles />
-          <h2>Supported through Sarvam AI&apos;s Startup Program</h2>
-          <p>
-            GuardRails has been accepted into the Sarvam AI Startup Program.
-            We&apos;re working with Sarvam AI through its Startup Program to make scan results easier to read. The guide helps with three common questions: Should I install this? What should I do about a flagged release? How should I answer a publisher? The scan remains the source of truth, and the guide says when it does not have enough information.
-          </p>
-          <p>
-            <a href="https://indus.sarvam.ai" target="_blank" rel="noreferrer">
-              Open Sarvam Indus
-            </a>{" "}
-            ·{" "}
-            <a href="https://docs.sarvam.ai" target="_blank" rel="noreferrer">
-              Read the API docs
-            </a>
+            . For questions, use the <Link href="/contact">contact page</Link>.
           </p>
         </article>
       </section>
@@ -124,7 +104,6 @@ export default function AboutPage() {
           Open Extension Registry <ArrowRight />
         </Link>
       </section>
-      <SarvamProgramNote />
     </main>
   );
 }

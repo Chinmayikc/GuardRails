@@ -3,7 +3,7 @@ import { isIP } from "node:net";
 type Alert = Record<string, unknown>;
 
 export function genericWebhookMessage(alert: Alert) {
-  const site = process.env.NEXT_PUBLIC_SITE_URL || "https://abscissa.dev";
+  const site = process.env.NEXT_PUBLIC_SITE_URL || "https://guardrails-hackathon.vercel.app";
   const extensionId = String(alert.extension_id || ""); const version = String(alert.version || "");
   const metadata = alert.metadata && typeof alert.metadata === "object" && !Array.isArray(alert.metadata) ? alert.metadata as Record<string, unknown> : {};
   return {

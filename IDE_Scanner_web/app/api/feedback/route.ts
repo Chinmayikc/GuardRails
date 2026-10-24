@@ -123,7 +123,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ ok: true, email_delivered: emailDelivered }, { status: 201 });
   }
   return NextResponse.json(
-    { error: "Feedback is temporarily unavailable. Please email hello@abscissa.dev." },
+    { error: "Feedback could not be saved. Please try again later." },
     { status: 503 },
   );
 }

@@ -17,7 +17,6 @@
   ],
   "_meta": {
     "io.modelcontextprotocol.registry/publisher-provided": {
-      "contactEmail": "hello@abscissa.dev",
       "documentationUrl": "https://abscissa.dev/docs/mcp",
       "categories": [
         "software_development",

@@ -71,8 +71,8 @@ export default function FooterNewsletter() {
         <small role="alert">{state.message}</small>
       ) : (
         <small>
-          Product and research updates only. Unsubscribe any time via
-          hello@abscissa.dev.
+          Product and research updates only. Unsubscribe any time using the
+          link included with the email.
         </small>
       )}
     </form>

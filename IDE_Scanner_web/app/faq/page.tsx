@@ -70,7 +70,7 @@ const faqs = [
   {
     question: "How do I dispute a finding or flag a malicious extension?",
     answer:
-      "Both are handled through the contact page. Report disputes should include the exact release link and describe what you believe was missed. Disputes are resolved through published corrections. Suspected malicious extensions can be reported to security@abscissa.dev for urgent review.",
+      "Both are handled through the contact and security pages. Report disputes should include the exact release link and describe what you believe was missed. Disputes are resolved through published corrections. Follow the security page for suspected malicious extensions.",
     href: "/contact",
     linkLabel: "Contact the team",
   },
@@ -135,7 +135,7 @@ export default function FaqPage() {
             <strong>Full public reports</strong>
           </div>
           <footer>
-            <ArrowRight /> Additional questions can be sent to hello@abscissa.dev
+            <ArrowRight /> Additional questions: use the Contact page
           </footer>
         </div>
       </section>

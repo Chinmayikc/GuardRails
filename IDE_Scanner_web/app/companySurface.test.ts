@@ -10,7 +10,7 @@ describe("company site surface", () => {
     expect(terms).toContain("point-in-time evidence");
     expect(terms).toContain("Disclosed before payment");
     expect(terms).toContain("not affiliated with or endorsed");
-    expect(terms).toContain("security@abscissa.dev");
+    expect(terms).toContain("Security page for vulnerability reports");
     expect(terms).toMatch(/export const metadata/);
   });
 
@@ -19,7 +19,7 @@ describe("company site surface", () => {
     expect(privacy).toContain('id="analytics"');
     expect(privacy).toContain("ConsentResetButton");
     expect(privacy).toContain("supervisory authority");
-    expect(privacy).toContain("security@abscissa.dev");
+    expect(privacy).not.toContain("@abscissa.dev");
   });
 
   it("answers FAQ questions with methodology links and structured data", () => {
@@ -42,16 +42,13 @@ describe("company site surface", () => {
 
   it("routes contact through real channels only", () => {
     const contact = read("./contact/page.tsx");
-    expect(contact).toContain("mailto:security@abscissa.dev");
+    expect(contact).toContain('href: "/security"');
     expect(contact).toContain("/design-partners");
   });
 
-  it("describes the Sarvam Startup Program relationship accurately", () => {
+  it("keeps third-party AI program references out of the about page", () => {
     const about = read("./about/page.tsx");
-    expect(about).toContain("Supported through Sarvam AI&apos;s Startup Program");
-    expect(about).toContain("make scan results easier to read");
-    expect(about).toContain("three common questions");
-    expect(about).toContain("The scan remains the source of truth");
+    expect(about.toLowerCase()).not.toContain("sarvam");
   });
 
   it("describes integrations that exist in the product", () => {

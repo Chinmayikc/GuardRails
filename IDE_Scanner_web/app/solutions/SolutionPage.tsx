@@ -84,9 +84,9 @@ export default function SolutionPage({ solution }: { solution: Solution }) {
             <Link href={solution.href}>
               Open the workflow <ArrowRight />
             </Link>
-            <a href="mailto:hello@abscissa.dev?subject=Intro%20call%20(20%20min)">
+            <Link href="/contact">
               {solution.callCta} <ArrowRight />
-            </a>
+            </Link>
           </div>
         ) : (
           <Link href={solution.href}>

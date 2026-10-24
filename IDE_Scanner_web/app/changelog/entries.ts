@@ -30,7 +30,7 @@ export const changelogEntries: readonly ChangelogEntry[] = [
     tag: "Site",
     paragraphs: [
       "sitemap.xml and robots.txt went live for search indexing, site metadata was rewritten to state concretely what GuardRails checks, and the homepage hero now says why it matters.",
-      "A security.txt file publishes our vulnerability disclosure contact (security@abscissa.dev) at /.well-known/security.txt.",
+      "Published a coordinated vulnerability disclosure process in the Security section.",
     ],
   },
   {

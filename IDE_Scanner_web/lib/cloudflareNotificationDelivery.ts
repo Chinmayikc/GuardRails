@@ -66,7 +66,7 @@ export function cloudflareNotificationRequest(
 }
 
 function emailPayload(input: JsonObject, recipient: string): JsonObject {
-  const site = runtimeEnv("NEXT_PUBLIC_SITE_URL") || "https://abscissa.dev";
+  const site = runtimeEnv("NEXT_PUBLIC_SITE_URL") || "https://guardrails-hackathon.vercel.app";
   if (String(input.event) === "guardrails.weekly_digest") {
     const highlights = Array.isArray(input.highlights) && input.highlights.length
       ? input.highlights.map((item) => `- ${String(item)}`).join("\n")

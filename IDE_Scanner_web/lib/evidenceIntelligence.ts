@@ -237,7 +237,7 @@ export type EvidenceIntelligenceReport = {
   omitted_fields: string[];
   validation: {
     status: "validated" | "deterministic_fallback";
-    source: "sarvam" | "deterministic";
+    source: "deterministic";
     claims_with_evidence: number;
     generated_at: string;
   };
@@ -508,7 +508,7 @@ export function verifyEvidenceIntelligenceTicket(ticket: EvidenceIntelligenceTic
 }
 
 function contextSigningSecret(): string {
-  return runtimeEnv("SARVAM_CONTEXT_SIGNING_SECRET").trim() || runtimeEnv("SARVAM_API_KEY").trim();
+  return runtimeEnv("EVIDENCE_CONTEXT_SIGNING_SECRET").trim();
 }
 
 function ticketPayload(serialized: string, contextDigest: string): string {
@@ -634,10 +634,10 @@ export function validateReviewerGuide(value: unknown, context: EvidenceIntellige
 export function assembleEvidenceIntelligenceReport(
   context: EvidenceIntelligenceContext,
   guide: ReviewerGuideDraft,
-  metadata: { model: string; review_goal: IntelligenceReviewGoal; depth: IntelligenceDepth; generated_at: string; source?: "sarvam" | "deterministic" },
+  metadata: { model: string; review_goal: IntelligenceReviewGoal; depth: IntelligenceDepth; generated_at: string; source?: "deterministic" },
 ): EvidenceIntelligenceReport {
   const claimsWithEvidence = 1 + guide.event_chain.steps.length + guide.scenarios.length + guide.release_changes.length + guide.next_actions.length + guide.unknowns.length;
-  const source = metadata.source || "sarvam";
+  const source = metadata.source || "deterministic";
   return {
     schema_version: EVIDENCE_INTELLIGENCE_SCHEMA_VERSION,
     generated_at: metadata.generated_at,

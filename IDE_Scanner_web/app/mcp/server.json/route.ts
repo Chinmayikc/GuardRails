@@ -14,7 +14,6 @@ const SERVER_CARD = {
   remotes: [{ type: "streamable-http", url: "https://abscissa.dev/api/mcp" }],
   _meta: {
     "io.modelcontextprotocol.registry/publisher-provided": {
-      contactEmail: "hello@abscissa.dev",
       documentationUrl: "https://abscissa.dev/docs/mcp",
       categories: ["software_development", "security"],
     },

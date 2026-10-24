@@ -203,9 +203,8 @@ export default function PrivacyPage() {
             GuardRails (abscissa.dev) is operated by an independent developer,
             not a registered company, and that individual operator determines
             the purposes and means of processing described on this page.
-            Privacy and data-subject requests: hello@abscissa.dev. Security
-            vulnerabilities: security@abscissa.dev, following{" "}
-            <Link href="/security">the security page</Link> and security.txt.
+            Privacy and data-subject requests: use the Contact page. Security
+            vulnerabilities: follow <Link href="/security">the security page</Link>.
           </p>
         </article>
         <article>
@@ -301,7 +300,7 @@ export default function PrivacyPage() {
             remove them; audit retention windows follow your plan. Imported
             report bundles never leave your browser unless you export them. You
             can request access, correction, export, or deletion of your account
-            data by writing to hello@abscissa.dev; identity verification
+            data through the Contact page; identity verification
             applies where one member could otherwise erase another team&apos;s
             record. Newsletter subscriptions can be ended the same way at any
             time. Where GDPR or similar laws apply, you may also lodge a

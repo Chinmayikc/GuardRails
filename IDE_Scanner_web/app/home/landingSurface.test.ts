@@ -57,7 +57,6 @@ describe("GuardRails landing surface", () => {
     expect(landing()).not.toContain("SarvamProgramNote");
     expect(read("./DecisionMemoryFilm.tsx")).not.toContain("Built-up context");
     expect(read("./LandingFaq.tsx")).not.toContain("Straight answers");
-    expect(read("../SarvamProgramNote.tsx")).not.toContain("AI-assisted reviewer guide");
   });
 
   it("keeps marketplace proof points visible", () => {

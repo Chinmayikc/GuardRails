@@ -241,25 +241,3 @@ textarea::placeholder {
   color: var(--ledger-signal-ink) !important;
 }
 
-.sarvamAbout article {
-  min-height: 0;
-  border-color: var(--ledger-signal-strong);
-  background: var(--ledger-signal-soft);
-}
-
-.sarvamAbout article > svg {
-  color: var(--ledger-signal) !important;
-}
-
-.sarvamAbout article a {
-  color: var(--ledger-signal-ink);
-  font-weight: 700;
-  text-decoration: underline;
-  text-underline-offset: 3px;
-}
-
-@media (max-width: 900px) {
-  .sarvamAbout {
-    grid-template-columns: 1fr;
-  }
-}

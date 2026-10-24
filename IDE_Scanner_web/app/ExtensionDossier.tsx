@@ -79,7 +79,7 @@ const sections: Array<{ id: Section; label: string; icon: typeof Radar }> = [
   { id: "raw", label: "Raw evidence", icon: Terminal },
 ];
 
-export default function AnalysisReport({ data, signedIn = false }: Props & { signedIn?: boolean }) {
+export default function AnalysisReport({ data }: Props) {
   const {
     id,
     version,
@@ -274,7 +274,6 @@ export default function AnalysisReport({ data, signedIn = false }: Props & { sig
           extensionId={id}
           version={version}
           scanId={String(scan.id || "")}
-          signedIn={signedIn}
         />
       </section>
     </main>

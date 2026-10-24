@@ -18,6 +18,8 @@ import { POST } from "./route";
 const original = {
   apiKey: process.env.RESEND_API_KEY,
   from: process.env.NOTIFICATION_FROM_EMAIL,
+  resendFrom: process.env.RESEND_FROM_EMAIL,
+  recipient: process.env.FEEDBACK_TO_EMAIL,
 };
 
 describe("feedback route", () => {
@@ -30,11 +32,15 @@ describe("feedback route", () => {
     vi.stubGlobal("fetch", vi.fn());
     delete process.env.RESEND_API_KEY;
     delete process.env.NOTIFICATION_FROM_EMAIL;
+    delete process.env.RESEND_FROM_EMAIL;
+    delete process.env.FEEDBACK_TO_EMAIL;
   });
 
   afterEach(() => {
     process.env.RESEND_API_KEY = original.apiKey;
     process.env.NOTIFICATION_FROM_EMAIL = original.from;
+    process.env.RESEND_FROM_EMAIL = original.resendFrom;
+    process.env.FEEDBACK_TO_EMAIL = original.recipient;
     vi.unstubAllGlobals();
   });
 
@@ -85,7 +91,8 @@ describe("feedback route", () => {
 
   it("sends the company notification and marks it delivered", async () => {
     process.env.RESEND_API_KEY = "resend_test";
-    process.env.NOTIFICATION_FROM_EMAIL = "feedback@abscissa.dev";
+    process.env.RESEND_FROM_EMAIL = "feedback@example.test";
+    process.env.FEEDBACK_TO_EMAIL = "inbox@example.test";
     mocks.rpc.mockResolvedValue({
       data: { id: "feedback-2", created_at: "2026-08-30T12:00:00.000Z" },
       error: null,

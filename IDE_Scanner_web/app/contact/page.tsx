@@ -23,8 +23,8 @@ const channels = [
     label: "Security issues",
     title: "Report a vulnerability",
     body: "Report a security problem in GuardRails or flag a malicious extension that requires urgent review. We follow coordinated disclosure and credit reporters.",
-    action: "security@abscissa.dev",
-    href: "mailto:security@abscissa.dev",
+    action: "Review security reporting guidance",
+    href: "/security",
   },
   {
     icon: Handshake,
@@ -39,8 +39,8 @@ const channels = [
     label: "Product and support",
     title: "Everything else",
     body: "Questions about reports, monitoring launch access, report orders, or your account — write from your workspace email where relevant so ownership is quick to verify.",
-    action: "hello@abscissa.dev",
-    href: "mailto:hello@abscissa.dev?subject=GuardRails%20support",
+    action: "Read support guidance",
+    href: "/faq",
   },
   {
     icon: Bug,
@@ -66,8 +66,8 @@ export default function ContactPage() {
             <em>the GuardRails team.</em>
           </h1>
           <p>
-            Messages reach the team that builds and operates GuardRails. Use
-            the channel matching your topic for the fastest response.
+            Choose the relevant product and security resources below. No
+            external email address is required to explore or use the product.
           </p>
           <div className={styles.actions}>
             <Link href="/status">
@@ -81,7 +81,7 @@ export default function ContactPage() {
             <Mail />
             <span>
               <small>General inquiries</small>
-              <strong>hello@abscissa.dev</strong>
+              <strong>Website resources</strong>
             </span>
           </header>
           <div>

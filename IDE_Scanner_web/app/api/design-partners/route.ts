@@ -15,7 +15,7 @@ export async function POST(request: Request) {
     const configIssue = /credential|not configured|supabase/i.test(message) && !/required/i.test(message);
     if (configIssue) {
       return NextResponse.json(
-        { error: "We could not record your request just now. Email hello@abscissa.dev and we will follow up directly." },
+        { error: "We could not record your request just now. Please try again later." },
         { status: 503 },
       );
     }
